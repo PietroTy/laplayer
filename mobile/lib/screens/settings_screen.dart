@@ -24,7 +24,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _spotifyIdCtrl = TextEditingController();
   final _spotifySecretCtrl = TextEditingController();
   final _downloadDirCtrl = TextEditingController();
-  final _serverUrlCtrl = TextEditingController();
  
   @override
   void initState() {
@@ -43,7 +42,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     } else {
       _downloadDirCtrl.text = await AppConstants.getDefaultMusicDirectory();
     }
-    _serverUrlCtrl.text = prefs.getString('server_url') ?? '';
     setState(() {});
   }
 
@@ -239,7 +237,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('spotify_client_id', _spotifyIdCtrl.text.trim());
     await prefs.setString('spotify_client_secret', _spotifySecretCtrl.text.trim());
-    await prefs.setString('server_url', _serverUrlCtrl.text.trim());
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -299,35 +296,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     labelText: 'Client Secret',
                     labelStyle: TextStyle(color: AppColors.textMuted),
                     prefixIcon: Icon(Icons.lock_rounded, color: AppColors.textMuted),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          // ── Servidor de Downloads ───────────────────────────────────────
-          _Section(
-            title: 'Servidor de Downloads',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── URL Manual (fallback) ────────────────────────────────
-                const Text(
-                  'O app localiza o servidor automaticamente via GitHub.\nUse este campo apenas como fallback em rede local.',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _serverUrlCtrl,
-                  style: const TextStyle(color: AppColors.textPrimary),
-                  decoration: const InputDecoration(
-                    labelText: 'URL Manual (ex: http://192.168.1.5:8000)',
-                    labelStyle: TextStyle(color: AppColors.textMuted),
-                    prefixIcon: Icon(Icons.dns_rounded, color: AppColors.textMuted),
-                    helperText: 'Opcional — preenchido automaticamente via GitHub',
-                    helperStyle: TextStyle(color: AppColors.textMuted, fontSize: 11),
                   ),
                 ),
               ],
@@ -575,7 +543,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _spotifyIdCtrl.dispose();
     _spotifySecretCtrl.dispose();
     _downloadDirCtrl.dispose();
-    _serverUrlCtrl.dispose();
     super.dispose();
   }
 }
