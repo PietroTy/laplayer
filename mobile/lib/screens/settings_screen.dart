@@ -25,7 +25,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _spotifySecretCtrl = TextEditingController();
   final _downloadDirCtrl = TextEditingController();
   final _serverUrlCtrl = TextEditingController();
-  final _githubRepoCtrl = TextEditingController();
  
   @override
   void initState() {
@@ -45,7 +44,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _downloadDirCtrl.text = await AppConstants.getDefaultMusicDirectory();
     }
     _serverUrlCtrl.text = prefs.getString('server_url') ?? '';
-    _githubRepoCtrl.text = prefs.getString('github_repo') ?? '';
     setState(() {});
   }
 
@@ -242,7 +240,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await prefs.setString('spotify_client_id', _spotifyIdCtrl.text.trim());
     await prefs.setString('spotify_client_secret', _spotifySecretCtrl.text.trim());
     await prefs.setString('server_url', _serverUrlCtrl.text.trim());
-    await prefs.setString('github_repo', _githubRepoCtrl.text.trim());
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -316,68 +313,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Método Principal: GitHub Auto-Discovery ──────────────
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppColors.accent.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: AppColors.accent.withOpacity(0.4)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.star_rounded, color: AppColors.accent, size: 12),
-                          const SizedBox(width: 4),
-                          Text(
-                            'RECOMENDADO',
-                            style: TextStyle(
-                              color: AppColors.accent,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
+                // ── URL Manual (fallback) ────────────────────────────────
                 const Text(
-                  'Informe o repositório GitHub (usuario/repositorio) que contém o arquivo server_url.txt. O script start_server atualiza este arquivo automaticamente sempre que o servidor é iniciado — o app sempre encontrará o endereço certo, mesmo que o IP mude.',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _githubRepoCtrl,
-                  style: const TextStyle(color: AppColors.textPrimary),
-                  decoration: const InputDecoration(
-                    labelText: 'Repositório GitHub (ex: PietroTy/laplayer)',
-                    labelStyle: TextStyle(color: AppColors.textMuted),
-                    prefixIcon: Icon(Icons.hub_rounded, color: AppColors.textMuted),
-                    helperText: 'Deixe preenchido para descoberta automática do servidor',
-                    helperStyle: TextStyle(color: AppColors.textMuted, fontSize: 11),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Divider(color: AppColors.border, height: 1),
-                const SizedBox(height: 16),
-                // ── Método Alternativo: URL Manual ───────────────────────
-                const Text(
-                  'URL MANUAL (FALLBACK)',
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Usado apenas se o repositório GitHub não estiver configurado ou o servidor estiver offline. Insira o IP do seu computador na rede local.',
+                  'O app localiza o servidor automaticamente via GitHub.\nUse este campo apenas como fallback em rede local.',
                   style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                 ),
                 const SizedBox(height: 12),
@@ -385,9 +323,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   controller: _serverUrlCtrl,
                   style: const TextStyle(color: AppColors.textPrimary),
                   decoration: const InputDecoration(
-                    labelText: 'URL do Servidor (ex: http://192.168.1.5:8000)',
+                    labelText: 'URL Manual (ex: http://192.168.1.5:8000)',
                     labelStyle: TextStyle(color: AppColors.textMuted),
                     prefixIcon: Icon(Icons.dns_rounded, color: AppColors.textMuted),
+                    helperText: 'Opcional — preenchido automaticamente via GitHub',
+                    helperStyle: TextStyle(color: AppColors.textMuted, fontSize: 11),
                   ),
                 ),
               ],
@@ -636,7 +576,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _spotifySecretCtrl.dispose();
     _downloadDirCtrl.dispose();
     _serverUrlCtrl.dispose();
-    _githubRepoCtrl.dispose();
     super.dispose();
   }
 }

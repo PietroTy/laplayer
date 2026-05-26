@@ -19,27 +19,26 @@ class ServerDownloader {
   }) async {
     onProgress("Solicitando ao servidor...", 0.1);
 
+    const githubRepo = 'PietroTy/laplayer';
+
     try {
       final prefs = await SharedPreferences.getInstance();
 
       // ── 1. Método principal: GitHub auto-discovery ──────────────────────
-      final githubRepo = prefs.getString('github_repo')?.trim() ?? '';
-      if (githubRepo.isNotEmpty) {
-        onProgress("Localizando servidor via GitHub...", 0.05);
-        try {
-          final tempDio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 5)));
-          final rawUrl = "https://raw.githubusercontent.com/$githubRepo/main/server_url.txt";
-          final response = await tempDio.get(rawUrl);
-          if (response.statusCode == 200 && response.data != null) {
-            final fetchedUrl = response.data.toString().trim();
-            if (fetchedUrl.startsWith("http")) {
-              await prefs.setString('server_url', fetchedUrl);
-              print("[ServerDownloader] URL atualizada via GitHub: $fetchedUrl");
-            }
+      onProgress("Localizando servidor via GitHub...", 0.05);
+      try {
+        final tempDio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 5)));
+        final rawUrl = "https://raw.githubusercontent.com/$githubRepo/main/server_url.txt";
+        final response = await tempDio.get(rawUrl);
+        if (response.statusCode == 200 && response.data != null) {
+          final fetchedUrl = response.data.toString().trim();
+          if (fetchedUrl.startsWith("http")) {
+            await prefs.setString('server_url', fetchedUrl);
+            print("[ServerDownloader] URL atualizada via GitHub: $fetchedUrl");
           }
-        } catch (e) {
-          print("[ServerDownloader] GitHub indisponível, usando URL em cache: $e");
         }
+      } catch (e) {
+        print("[ServerDownloader] GitHub indisponível, usando URL em cache: $e");
       }
 
       // ── 2. Método fallback: URL manual / cache ──────────────────────────
@@ -47,8 +46,8 @@ class ServerDownloader {
 
       if (serverUrl.isEmpty) {
         throw Exception(
-          'Nenhum servidor configurado.\n'
-          'Informe o repositório GitHub ou a URL manual nas Configurações.',
+          'Servidor temporariamente indisponível.\n'
+          'Verifique se o servidor está rodando e tente novamente.',
         );
       }
 
