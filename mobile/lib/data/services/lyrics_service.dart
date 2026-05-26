@@ -39,7 +39,7 @@ class LyricsService {
     connectTimeout: const Duration(seconds: 10),
     receiveTimeout: const Duration(seconds: 10),
     headers: {
-      'User-Agent': 'la_player/1.0.0 (https://github.com/la_player)',
+      'User-Agent': 'la_player/1.0.0 (https://github.com/PietroTy/laplayer)',
     },
   ));
 

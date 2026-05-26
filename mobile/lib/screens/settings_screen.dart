@@ -355,7 +355,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   controller: _githubRepoCtrl,
                   style: const TextStyle(color: AppColors.textPrimary),
                   decoration: const InputDecoration(
-                    labelText: 'Repositório GitHub (ex: PietroTy/localify-url)',
+                    labelText: 'Repositório GitHub (ex: PietroTy/laplayer)',
                     labelStyle: TextStyle(color: AppColors.textMuted),
                     prefixIcon: Icon(Icons.hub_rounded, color: AppColors.textMuted),
                     helperText: 'Deixe preenchido para descoberta automática do servidor',
