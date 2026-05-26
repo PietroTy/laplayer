@@ -1,0 +1,14 @@
+// chaquopy.gradle — Groovy DSL for Chaquopy configuration.
+// Applied from app/build.gradle.kts via apply(from = "chaquopy.gradle").
+// Groovy's dynamic dispatch resolves the python{} extension without needing
+// Kotlin DSL type-safe accessor generation (which fails with Flutter's includeBuild setup).
+
+android.defaultConfig {
+    python {
+        version "3.10"
+        pip {
+            // Use a versão mais recente estável do yt-dlp
+            install "yt-dlp"
+        }
+    }
+}

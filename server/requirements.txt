@@ -1,0 +1,5 @@
+fastapi[all]==0.111.0
+uvicorn==0.30.1
+yt-dlp==2024.5.27
+mutagen==1.47.0
+requests==2.32.3
