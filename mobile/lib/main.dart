@@ -1,6 +1,7 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -33,6 +34,9 @@ Future<void> main() async {
 
   // Inicializa banco de dados
   await AppDatabase.instance.init();
+
+  // Inicializa o FlutterForegroundTask (necessário antes de qualquer uso)
+  FlutterForegroundTask.initCommunicationPort();
 
   // Carrega tema salvo ANTES do runApp para evitar flash do tema padrão
   final prefs = await SharedPreferences.getInstance();

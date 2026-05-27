@@ -1,10 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
+
 import '../core/theme.dart';
+import '../data/database/database.dart';
+import '../data/models/playlist.dart';
 import '../data/services/sync_service.dart';
 import '../providers/library_provider.dart';
 import 'widgets/app_logo.dart';
+
+// ── Modos de criação ──────────────────────────────────────────────────────────
+
+enum _CreateMode { choose, blank, spotify }
 
 class AddPlaylistScreen extends ConsumerStatefulWidget {
   const AddPlaylistScreen({super.key});
@@ -14,14 +22,29 @@ class AddPlaylistScreen extends ConsumerStatefulWidget {
 }
 
 class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
+  _CreateMode _mode = _CreateMode.choose;
+
+  // Spotify fields
   final _urlController = TextEditingController();
   final _clientIdController = TextEditingController();
   final _clientSecretController = TextEditingController();
+
+  // Blank playlist fields
+  final _nameController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadSavedKeys();
+  }
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    _clientIdController.dispose();
+    _clientSecretController.dispose();
+    _nameController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSavedKeys() async {
@@ -32,13 +55,55 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
     });
   }
 
-  Future<void> _saveKeys() async {
+  Future<void> _saveSpotifyKeys() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('spotify_client_id', _clientIdController.text.trim());
     await prefs.setString('spotify_client_secret', _clientSecretController.text.trim());
   }
 
-  Future<void> _handleAdd() async {
+  // ── Criar playlist em branco ──────────────────────────────────────────────
+
+  Future<void> _createBlankPlaylist() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Dê um nome para a playlist.')),
+      );
+      return;
+    }
+
+    try {
+      final id = const Uuid().v4();
+      final playlist = Playlist(
+        id: id,
+        name: name,
+        totalTracks: 0,
+        downloaded: 0,
+      );
+      await AppDatabase.instance.upsertPlaylist(playlist);
+      ref.invalidate(playlistsProvider);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Playlist "$name" criada!'),
+            backgroundColor: AppColors.accent,
+          ),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    }
+  }
+
+  // ── Importar do Spotify ───────────────────────────────────────────────────
+
+  Future<void> _handleSpotifyImport() async {
     final url = _urlController.text.trim();
     if (url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -46,20 +111,16 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
       );
       return;
     }
-
-    await _saveKeys();
-    
-    // Dispara o fluxo Local-First
+    await _saveSpotifyKeys();
     await ref.read(syncProvider.notifier).addNewPlaylist(url);
-    
+
     final state = ref.read(syncProvider);
+    if (!mounted) return;
     if (state.error != null) {
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${state.error}'), backgroundColor: AppColors.error),
       );
     } else if (state.message != null && !state.isLoading) {
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(state.message!), backgroundColor: AppColors.accent),
       );
@@ -68,26 +129,149 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
     }
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
+    return switch (_mode) {
+      _CreateMode.choose  => _buildChoose(),
+      _CreateMode.blank   => _buildBlankForm(),
+      _CreateMode.spotify => _buildSpotifyForm(),
+    };
+  }
+
+  // Tela de escolha
+  Widget _buildChoose() {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        title: const Text('Nova Playlist'),
+        backgroundColor: AppColors.bg,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.only(bottom: 36),
+                child: AppLogo(size: 56, showText: true, textGap: 12, textFontSize: 22),
+              ),
+            ),
+            const Text(
+              'Como deseja criar?',
+              style: TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+
+            // Opção: Playlist em Branco
+            _ChoiceCard(
+              icon: Icons.add_box_rounded,
+              iconColor: AppColors.accent,
+              title: 'Playlist em Branco',
+              subtitle: 'Crie uma playlist vazia e adicione músicas buscando no YouTube.',
+              onTap: () => setState(() => _mode = _CreateMode.blank),
+            ),
+            const SizedBox(height: 16),
+
+            // Opção: Importar do Spotify
+            _ChoiceCard(
+              icon: Icons.podcasts_rounded,
+              iconColor: const Color(0xFF1DB954),
+              title: 'Importar do Spotify',
+              subtitle: 'Sincronize uma playlist do Spotify como fonte de metadados.',
+              onTap: () => setState(() => _mode = _CreateMode.spotify),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Formulário: Playlist em branco
+  Widget _buildBlankForm() {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        title: const Text('Playlist em Branco'),
+        backgroundColor: AppColors.bg,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => setState(() => _mode = _CreateMode.choose),
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Icon(Icons.queue_music_rounded, color: AppColors.accent, size: 56),
+            const SizedBox(height: 24),
+            const Text(
+              'Nome da Playlist',
+              style: TextStyle(color: AppColors.textSecond, fontSize: 13),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _nameController,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white),
+              textCapitalization: TextCapitalization.sentences,
+              decoration: AppTheme.inputDecoration('Ex: Minhas favoritas'),
+              onSubmitted: (_) => _createBlankPlaylist(),
+            ),
+            const SizedBox(height: 32),
+            ElevatedButton(
+              onPressed: _createBlankPlaylist,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.black,
+                minimumSize: const Size.fromHeight(50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+              ),
+              child: const Text('CRIAR PLAYLIST',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Após criar, use a aba YouTube na busca para adicionar músicas diretamente.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Formulário: Spotify
+  Widget _buildSpotifyForm() {
     final syncState = ref.watch(syncProvider);
     final isLoading = syncState.isLoading;
 
     return PopScope(
       canPop: !isLoading,
       onPopInvoked: (didPop) {
-        if (!didPop && isLoading) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Aguarde a sincronização finalizar para sair.')),
-          );
-        }
+        if (!didPop) return;
+        if (!isLoading) setState(() => _mode = _CreateMode.choose);
       },
       child: Scaffold(
         backgroundColor: AppColors.bg,
         appBar: AppBar(
-          title: const Text('Nova Playlist'),
+          title: const Text('Importar do Spotify'),
           backgroundColor: AppColors.bg,
-          leading: isLoading ? const SizedBox() : null,
+          leading: isLoading
+              ? const SizedBox()
+              : IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  onPressed: () => setState(() => _mode = _CreateMode.choose),
+                ),
         ),
         body: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -96,19 +280,13 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
             children: [
               const Center(
                 child: Padding(
-                  padding: EdgeInsets.only(bottom: 32.0),
-                  child: AppLogo(
-                    size: 64,
-                    showText: true,
-                    textGap: 14,
-                    textFontSize: 24,
-                  ),
+                  padding: EdgeInsets.only(bottom: 24),
+                  child: Icon(Icons.podcasts_rounded,
+                      color: Color(0xFF1DB954), size: 56),
                 ),
               ),
-              const Text(
-                'Link da Playlist',
-                style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
-              ),
+              const Text('Link da Playlist',
+                  style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               TextField(
                 controller: _urlController,
@@ -117,11 +295,8 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
                 decoration: AppTheme.inputDecoration('https://open.spotify.com/playlist/...'),
               ),
               const SizedBox(height: 24),
-              
-              const Text(
-                'Credenciais da API (Salvas localmente)',
-                style: TextStyle(color: AppColors.textSecond, fontSize: 13),
-              ),
+              const Text('Credenciais da API (Salvas localmente)',
+                  style: TextStyle(color: AppColors.textSecond, fontSize: 13)),
               const SizedBox(height: 12),
               TextField(
                 controller: _clientIdController,
@@ -137,7 +312,6 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
                 obscureText: true,
                 decoration: AppTheme.inputDecoration('Spotify Client Secret'),
               ),
-              
               const SizedBox(height: 40),
               if (isLoading) ...[
                 Center(child: CircularProgressIndicator(color: AppColors.accent)),
@@ -152,7 +326,7 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
                 const SizedBox(height: 12),
                 const Center(
                   child: Text(
-                    'Não feche o app agora.\nProcessando milhares de músicas...',
+                    'Não feche o app agora.\nProcessando músicas...',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                   ),
@@ -162,21 +336,80 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: _handleAdd,
+                    onPressed: _handleSpotifyImport,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.accent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                      backgroundColor: const Color(0xFF1DB954),
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(25)),
                     ),
-                    child: const Text('SINCRONIZAR PLAYLIST', 
-                        style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                    child: const Text('SINCRONIZAR PLAYLIST',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
-              const SizedBox(height: 30),
-              const Text(
-                'O لاplayer baixará todos os metadados (título, artista, álbum, capa) do Spotify e salvará no banco de dados local.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Widget de opção de escolha ────────────────────────────────────────────────
+
+class _ChoiceCard extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _ChoiceCard({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Container(
+                width: 52, height: 52,
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: iconColor, size: 28),
               ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 4),
+                    Text(subtitle,
+                        style: const TextStyle(
+                            color: AppColors.textMuted, fontSize: 12)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
             ],
           ),
         ),

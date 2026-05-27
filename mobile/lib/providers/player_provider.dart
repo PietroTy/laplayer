@@ -296,26 +296,34 @@ class PlayerNotifier extends StateNotifier<app.PlayerState> {
       others.shuffle();
       newQueue = [currentTrack, ...others];
     } else {
-      // Smart Shuffle: ordena por afinidade de gêneros a partir da música atual
+      // Smart Shuffle (Shuffle Plus): ordena embaralhando primeiro e depois encadeando por gênero comum
       final others = List<Track>.from(_originalQueue)
         ..removeWhere((t) => t.id == currentTrack.id);
+      
+      // Primeiro embaralha como shuffle padrão
+      others.shuffle();
 
       final smartOrder = <Track>[];
       final remaining = List<Track>.from(others);
       Track last = currentTrack;
 
       while (remaining.isNotEmpty) {
-        int bestIdx = 0;
-        int bestOverlap = -1;
+        int foundIdx = -1;
         for (int i = 0; i < remaining.length; i++) {
-          final overlap =
-              remaining[i].genres.where((g) => last.genres.contains(g)).length;
-          if (overlap > bestOverlap) {
-            bestOverlap = overlap;
-            bestIdx = i;
+          final candidate = remaining[i];
+          final hasCommonGenre = candidate.genres.any((g) => last.genres.contains(g));
+          if (hasCommonGenre) {
+            foundIdx = i;
+            break; // Escolhe a primeira música shufflada com gênero comum
           }
         }
-        final nextTrack = remaining.removeAt(bestIdx);
+
+        // Se nenhuma compartilhar gêneros, pega a primeira da lista já shufflada
+        if (foundIdx == -1) {
+          foundIdx = 0;
+        }
+
+        final nextTrack = remaining.removeAt(foundIdx);
         smartOrder.add(nextTrack);
         last = nextTrack;
       }
@@ -388,23 +396,29 @@ class PlayerNotifier extends StateNotifier<app.PlayerState> {
       return [selected, ...others];
     }
 
-    // Smart shuffle por gêneros
+    // Smart shuffle por gêneros (Shuffle Plus)
+    final othersShuffled = List<Track>.from(others)..shuffle();
     final smartOrder = <Track>[];
-    final remaining = List<Track>.from(others);
+    final remaining = List<Track>.from(othersShuffled);
     Track last = selected;
 
     while (remaining.isNotEmpty) {
-      int bestIdx = 0;
-      int bestOverlap = -1;
+      int foundIdx = -1;
       for (int i = 0; i < remaining.length; i++) {
-        final overlap =
-            remaining[i].genres.where((g) => last.genres.contains(g)).length;
-        if (overlap > bestOverlap) {
-          bestOverlap = overlap;
-          bestIdx = i;
+        final candidate = remaining[i];
+        final hasCommonGenre = candidate.genres.any((g) => last.genres.contains(g));
+        if (hasCommonGenre) {
+          foundIdx = i;
+          break; // Escolhe a primeira música shufflada com gênero comum
         }
       }
-      final nextTrack = remaining.removeAt(bestIdx);
+
+      // Se nenhuma compartilhar gêneros, pega a primeira da lista já shufflada
+      if (foundIdx == -1) {
+        foundIdx = 0;
+      }
+
+      final nextTrack = remaining.removeAt(foundIdx);
       smartOrder.add(nextTrack);
       last = nextTrack;
     }

@@ -15,6 +15,7 @@ class ServerDownloader {
     required String trackId,
     int? durationMs,
     int? skipMatch,
+    String? youtubeUrl,
     required Function(String status, double percentage) onProgress,
   }) async {
     onProgress("Solicitando ao servidor...", 0.1);
@@ -28,7 +29,8 @@ class ServerDownloader {
       onProgress("Localizando servidor via GitHub...", 0.05);
       try {
         final tempDio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 5)));
-        final rawUrl = "https://raw.githubusercontent.com/$githubRepo/main/server_url.txt";
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final rawUrl = "https://raw.githubusercontent.com/$githubRepo/main/server_url.txt?t=$timestamp";
         final response = await tempDio.get(rawUrl);
         if (response.statusCode == 200 && response.data != null) {
           final fetchedUrl = response.data.toString().trim();
@@ -76,6 +78,7 @@ class ServerDownloader {
           'imageUrl': imageUrl,
           'duration_ms': durationMs ?? 0,
           'skip_match': skipMatch ?? 0,
+          'youtube_url': youtubeUrl,
         },
         options: Options(
           method: 'POST',

@@ -11,6 +11,7 @@ import 'spotify_service.dart';
 import '../../providers/library_provider.dart';
 import 'server_downloader.dart';
 import 'lyrics_service.dart';
+import 'download_foreground_service.dart';
 
 /// Estado detalhado da sincronização
 class SyncState {
@@ -266,8 +267,10 @@ class SyncService extends StateNotifier<SyncState> {
 
   Future<void> syncAudio(String playlistId) async {
     _cancelRequested = false;
+    final _fgs = DownloadForegroundService.instance;
+
     try {
-      state = SyncState.loading('Preparando download nativo...', progress: 0.0);
+      state = SyncState.loading('Preparando download...', progress: 0.0);
 
       // 1. Busca tracks que precisam de download
       final allTracks = await AppDatabase.instance.getTracksForPlaylist(playlistId);
@@ -278,11 +281,24 @@ class SyncService extends StateNotifier<SyncState> {
         return;
       }
 
+      // 2. Inicia o foreground service — impede o Android de matar o processo
+      //    quando a tela desligar ou o app ir para o background
+      await _fgs.start(
+        playlistName: 'Iniciando downloads...',
+        onStarted: () {},
+      );
+
       int downloadedCount = 0;
       int failedCount = 0;
 
       for (final track in pendingTracks) {
         if (_cancelRequested) break;
+
+        // Atualiza notificação com a música atual
+        _fgs.updateNotification(
+          'Baixando ${downloadedCount + 1}/${pendingTracks.length}',
+          track.title,
+        );
 
         // Marca a track como 'downloading'
         await AppDatabase.instance.upsertTracks([track.copyWith(
@@ -318,21 +334,16 @@ class SyncService extends StateNotifier<SyncState> {
 
         if (file != null) {
           downloadedCount++;
-          // Atualiza banco local
           await AppDatabase.instance.upsertTracks([track.copyWith(
             available: true,
             isCached: true,
             downloadStatus: 'success',
             localFilename: p.basename(file.path),
           )]);
-          // Força atualização da UI (contadores)
           ref.invalidate(playlistTracksProvider(playlistId));
           ref.invalidate(playlistsProvider);
-          
-          // Prefetch lyrics em background (assíncrono/opcional)
+
           LyricsService.instance.prefetchAndSave(track);
-          
-          // Pausa anti-ban do YouTube
           await Future.delayed(const Duration(seconds: 2));
         } else {
           failedCount++;
@@ -343,15 +354,19 @@ class SyncService extends StateNotifier<SyncState> {
         }
       }
 
+      // 3. Para o foreground service ao concluir
+      await _fgs.stop();
+
       if (_cancelRequested) {
         state = SyncState.success('Download cancelado pelo usuário.');
       } else {
         state = SyncState.success('Concluído! $downloadedCount baixadas, $failedCount falhas.');
       }
-      
+
       ref.invalidate(playlistsProvider);
     } catch (e) {
-      state = SyncState.error('Erro no download nativo: $e');
+      await _fgs.stop();
+      state = SyncState.error('Erro no download: $e');
     }
   }
   Future<void> addNewPlaylist(String input) async {
@@ -489,6 +504,65 @@ class SyncService extends StateNotifier<SyncState> {
         )]);
         ref.invalidate(playlistTracksProvider(track.playlistId));
         state = SyncState.error('Nenhuma versão alternativa encontrada.');
+        return false;
+      }
+    } catch (e) {
+      ref.read(downloadProgressProvider(track.id).notifier).state = null;
+      await AppDatabase.instance.upsertTracks([track.copyWith(
+        downloadStatus: 'failed',
+      )]);
+      ref.invalidate(playlistTracksProvider(track.playlistId));
+      state = SyncState.error('Erro: $e');
+      return false;
+    }
+  }
+
+  /// Baixa uma versão alternativa específica da música usando a URL selecionada.
+  Future<bool> redownloadSpecificAlternative(Track track, String youtubeUrl) async {
+    try {
+      state = SyncState.loading('Baixando versão alternativa selecionada...');
+
+      // Marca a track como 'downloading'
+      await AppDatabase.instance.upsertTracks([track.copyWith(
+        downloadStatus: 'downloading',
+      )]);
+      ref.read(downloadProgressProvider(track.id).notifier).state = 0.0;
+      ref.invalidate(playlistTracksProvider(track.playlistId));
+
+      final file = await _serverDownloader.downloadTrack(
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        imageUrl: track.albumArtUrl,
+        playlistId: track.playlistId,
+        trackId: track.id,
+        durationMs: track.durationMs,
+        youtubeUrl: youtubeUrl,
+        onProgress: (msg, trackProgress) {
+          ref.read(downloadProgressProvider(track.id).notifier).state = trackProgress;
+          state = SyncState.loading(msg);
+        },
+      );
+
+      ref.read(downloadProgressProvider(track.id).notifier).state = null;
+
+      if (file != null) {
+        await AppDatabase.instance.upsertTracks([track.copyWith(
+          available: true,
+          isCached: true,
+          downloadStatus: 'success',
+          localFilename: p.basename(file.path),
+        )]);
+        ref.invalidate(playlistTracksProvider(track.playlistId));
+        ref.invalidate(playlistsProvider);
+        state = SyncState.success('Versão alternativa baixada com sucesso!');
+        return true;
+      } else {
+        await AppDatabase.instance.upsertTracks([track.copyWith(
+          downloadStatus: 'failed',
+        )]);
+        ref.invalidate(playlistTracksProvider(track.playlistId));
+        state = SyncState.error('Não foi possível baixar esta versão.');
         return false;
       }
     } catch (e) {

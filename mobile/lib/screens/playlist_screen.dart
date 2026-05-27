@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/theme.dart';
 import '../data/models/player_state.dart' as app;
+import '../data/models/playlist.dart';
 import '../data/services/sync_service.dart';
 import '../providers/library_provider.dart';
 import '../providers/player_provider.dart';
@@ -85,6 +86,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                   t.artist.toLowerCase().contains(_searchQuery.toLowerCase())
                 ).toList();
           final availableTracks = filteredTracks.where((t) => t.isCached).toList();
+          final allAvailableTracks = tracks.where((t) => t.isCached).toList();
 
           // Rolagem automática para a faixa destacada (highlightTrackId)
           if (widget.highlightTrackId != null && !_hasScrolledToHighlight && filteredTracks.isNotEmpty) {
@@ -143,6 +145,12 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                       ),
                     ),
                     actions: [
+                      if (playlistDetails != null)
+                        IconButton(
+                          tooltip: 'Editar Playlist',
+                          icon: const Icon(Icons.edit_rounded, color: AppColors.textPrimary),
+                          onPressed: () => _showEditPlaylistDialog(context, playlistDetails),
+                        ),
                       IconButton(
                         tooltip: 'Sincronizar Dados (Spotify)',
                         icon: syncState.isLoading 
@@ -260,14 +268,14 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                                 ),
                               ),
                               // Spotify-style Green circular Play & Shuffle Buttons
-                              if (availableTracks.isNotEmpty)
+                              if (allAvailableTracks.isNotEmpty)
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     // Smart Shuffle Play (Shuffle+)
                                     GestureDetector(
                                       onTap: () => ref.read(playerProvider.notifier).playQueueWithShuffle(
-                                        availableTracks,
+                                        allAvailableTracks,
                                         shuffleMode: app.ShuffleMode.smart,
                                       ),
                                       child: Container(
@@ -305,7 +313,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                                     // Shuffle Play (Shuffle)
                                     GestureDetector(
                                       onTap: () => ref.read(playerProvider.notifier).playQueueWithShuffle(
-                                        availableTracks,
+                                        allAvailableTracks,
                                         shuffleMode: app.ShuffleMode.random,
                                       ),
                                       child: Container(
@@ -329,7 +337,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                                     // Standard Play
                                     GestureDetector(
                                       onTap: () => ref.read(playerProvider.notifier).playQueueWithShuffle(
-                                        availableTracks,
+                                        allAvailableTracks,
                                         shuffleMode: app.ShuffleMode.off,
                                       ),
                                       child: Container(
@@ -387,7 +395,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                       delegate: SliverChildBuilderDelegate(
                         (context, i) {
                           if (_isScrolling && _velocity > 250) return const _TrackPlaceholder();
-                          return TrackTile(track: filteredTracks[i], queue: availableTracks, showIndex: true);
+                          return TrackTile(track: filteredTracks[i], queue: allAvailableTracks, showIndex: true);
                         },
                         childCount: filteredTracks.length,
                       ),
@@ -412,6 +420,129 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
           ),
         ),
       );
+
+  void _showEditPlaylistDialog(BuildContext context, Playlist playlist) {
+    final nameController = TextEditingController(text: playlist.name);
+    final descController = TextEditingController(text: playlist.description);
+    final urlController = TextEditingController(text: playlist.imageUrl);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            'Editar Playlist',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Nome', style: TextStyle(color: AppColors.textSecond, fontSize: 12)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: nameController,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    hintText: 'Minha super playlist',
+                    hintStyle: const TextStyle(color: AppColors.textMuted),
+                    filled: true,
+                    fillColor: AppColors.bg,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text('Descrição', style: TextStyle(color: AppColors.textSecond, fontSize: 12)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: descController,
+                  maxLines: 3,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    hintText: 'Uma playlist incrível...',
+                    hintStyle: const TextStyle(color: AppColors.textMuted),
+                    filled: true,
+                    fillColor: AppColors.bg,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text('URL da Foto (Capa)', style: TextStyle(color: AppColors.textSecond, fontSize: 12)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: urlController,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: 'https://exemplo.com/foto.jpg',
+                    hintStyle: const TextStyle(color: AppColors.textMuted),
+                    filled: true,
+                    fillColor: AppColors.bg,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () async {
+                final name = nameController.text.trim();
+                if (name.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('O nome da playlist não pode ser vazio.'), backgroundColor: AppColors.error),
+                  );
+                  return;
+                }
+
+                Navigator.pop(context);
+
+                // Mostra indicador de carregamento
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Salvando alterações...'), duration: Duration(milliseconds: 500)),
+                );
+
+                await ref.read(libraryProvider.notifier).updatePlaylistDetails(
+                  playlistId: playlist.id,
+                  name: name,
+                  description: descController.text.trim(),
+                  imageUrl: urlController.text.trim(),
+                );
+
+                ref.invalidate(playlistDetailsProvider(playlist.id));
+              },
+              child: const Text('Salvar', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 class _TrackPlaceholder extends StatelessWidget {

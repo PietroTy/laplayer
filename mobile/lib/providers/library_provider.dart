@@ -54,6 +54,30 @@ class LibraryNotifier extends StateNotifier<AsyncValue<void>> {
       print('Erro ao atualizar metadados: $e');
     }
   }
+
+  /// Atualiza nome, descrição e URL da imagem da playlist
+  Future<void> updatePlaylistDetails({
+    required String playlistId,
+    required String name,
+    required String description,
+    required String imageUrl,
+  }) async {
+    state = const AsyncValue.loading();
+    try {
+      final playlists = await ref.read(playlistsProvider.future);
+      final playlist = playlists.firstWhere((p) => p.id == playlistId);
+      final updated = playlist.copyWith(
+        name: name,
+        description: description,
+        imageUrl: imageUrl,
+      );
+      await AppDatabase.instance.upsertPlaylist(updated);
+      ref.invalidate(playlistsProvider);
+      state = const AsyncValue.data(null);
+    } catch (e, stack) {
+      state = AsyncValue.error(e, stack);
+    }
+  }
 }
 
 final libraryProvider = StateNotifierProvider<LibraryNotifier, AsyncValue<void>>((ref) {

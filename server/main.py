@@ -10,6 +10,69 @@ import yt_dlp
 import requests
 from mutagen.mp4 import MP4, MP4Cover
 
+# ---------------------------------------------------------------------------
+# Cookie configuration – helps bypass YouTube bot-detection.
+#
+# Priority:
+#   1. A `cookies.txt` (Netscape format) placed next to this file.
+#   2. Chromium cookie store (read directly by yt-dlp).
+#   3. Firefox cookie store (read directly by yt-dlp).
+#
+# To generate cookies.txt manually:
+#   yt-dlp --cookies-from-browser chromium --cookies cookies.txt <any-yt-url>
+# ---------------------------------------------------------------------------
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_COOKIES_FILE = os.path.join(_SCRIPT_DIR, "cookies.txt")
+
+def _detect_cookie_opts() -> dict:
+    """Detect and return the best available cookie options for yt-dlp (runs once at startup)."""
+    if os.path.exists(_COOKIES_FILE):
+        print(f"[Backend] Usando cookies.txt: {_COOKIES_FILE}")
+        return {"cookiefile": _COOKIES_FILE}
+    for browser in ("chromium", "firefox"):
+        try:
+            with yt_dlp.YoutubeDL({"cookies_from_browser": (browser,), "quiet": True, "no_warnings": True}) as _ydl:
+                _ydl.cookiejar  # just accessing the jar is enough to validate
+            print(f"[Backend] Usando cookies do navegador: {browser}")
+            return {"cookies_from_browser": (browser,)}
+        except Exception:
+            pass
+    print("[Backend] Nenhuma fonte de cookies disponível – downloads podem falhar por bot-detection.")
+    return {}
+
+# Cached at startup – avoids re-probing on every request
+_COOKIE_OPTS: dict = _detect_cookie_opts()
+
+# Node.js path for YouTube JS challenge solving (signature decryption)
+import shutil as _shutil
+import os
+_NODE_PATH = ""
+for _path in [
+    _shutil.which("node"),
+    "/home/pit/.nvm/versions/node/v20.20.0/bin/node",
+    os.path.expanduser("~/.nvm/versions/node/v20.20.0/bin/node")
+]:
+    if _path and os.path.exists(_path):
+        _NODE_PATH = _path
+        break
+if not _NODE_PATH:
+    # default fallback just in case
+    _NODE_PATH = "node"
+
+def _get_base_opts() -> dict:
+    """Common yt-dlp options shared across all calls (cookies + JS runtime)."""
+    opts = {**_COOKIE_OPTS}
+    if _NODE_PATH:
+        opts["js_runtimes"] = {"node": {"path": _NODE_PATH}}
+    
+    # Enable the remote component challenge solver script needed for YouTube JS challenge solving
+    opts["remote_components"] = "ejs:github"
+    return opts
+
+# Print configuration status on import
+print(f"[Backend] Node.js detectado para resolver desafios do YouTube: {_NODE_PATH}")
+
 app = FastAPI(title="Localify Backend Server")
 
 TEMP_DIR = "temp_downloads"
@@ -22,6 +85,7 @@ class TrackRequest(BaseModel):
     imageUrl: Optional[str] = None
     duration_ms: Optional[int] = 0
     skip_match: Optional[int] = 0
+    youtube_url: Optional[str] = None  # Se fornecido, baixa diretamente sem busca
 
 def cleanup_file(filepath: str):
     try:
@@ -45,6 +109,61 @@ def clean_query_string(artist: str, title: str) -> str:
     # Replace multiple spaces with a single space
     query = re.sub(r'\s+', ' ', query).strip()
     return query
+
+@app.get("/api/search")
+async def search_tracks(q: str, limit: int = 8):
+    """
+    Busca músicas no YouTube sem baixar nada.
+    Retorna candidatos com título, artista, duração e thumbnail.
+    """
+    if not q or not q.strip():
+        raise HTTPException(status_code=400, detail="Parâmetro 'q' é obrigatório.")
+
+    limit = max(1, min(limit, 20))  # Limita entre 1 e 20 resultados
+
+    search_opts = {
+        'extract_flat': True,
+        'quiet': True,
+        'no_warnings': True,
+        'nocheckcertificate': True,
+        'geo_bypass': True,
+        **_get_base_opts(),
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(search_opts) as ydl:
+            results = ydl.extract_info(f"ytsearch{limit}:{q.strip()}", download=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar no YouTube: {e}")
+
+    entries = results.get("entries", []) if results else []
+
+    tracks = []
+    for entry in entries:
+        if not entry:
+            continue
+        video_id = entry.get("id") or entry.get("url", "")
+        duration_s = entry.get("duration") or 0
+        # Pega a melhor thumbnail disponível
+        thumbnails = entry.get("thumbnails") or []
+        thumbnail = ""
+        if thumbnails:
+            # Prefere a de maior resolução (última da lista normalmente)
+            thumbnail = thumbnails[-1].get("url", "") or thumbnails[0].get("url", "")
+        if not thumbnail:
+            thumbnail = entry.get("thumbnail", "")
+
+        tracks.append({
+            "youtube_id":  video_id,
+            "title":       entry.get("title", ""),
+            "artist":      entry.get("uploader") or entry.get("channel") or "",
+            "duration_ms": int(duration_s * 1000),
+            "thumbnail":   thumbnail,
+            "url":         f"https://www.youtube.com/watch?v={video_id}",
+        })
+
+    return {"results": tracks, "query": q.strip()}
+
 
 @app.post("/api/download")
 async def download_track(request: TrackRequest, background_tasks: BackgroundTasks):
@@ -83,97 +202,127 @@ async def download_track(request: TrackRequest, background_tasks: BackgroundTask
 
     downloaded_file = None
 
-    # Tenta cada query de busca
-    for attempt_idx, query in enumerate(queries):
-        print(f"[Backend] Tentando busca ({attempt_idx + 1}/{len(queries)}): {query}")
-        
-        # Buscamos os primeiros 5 resultados (sem baixar) usando o prefixo ytsearch5:
-        search_opts = {
-            'extract_flat': True,
+    # ── Caminho rápido: URL do YouTube fornecida diretamente ─────────────────
+    if request.youtube_url:
+        print(f"[Backend] Download direto de URL: {request.youtube_url}")
+        ydl_opts = {
+            'format': 'm4a/bestaudio/best',
+            'outtmpl': os.path.join(TEMP_DIR, f"{base_filename}.%(ext)s"),
             'quiet': True,
             'no_warnings': True,
+            'noplaylist': True,
             'nocheckcertificate': True,
             'geo_bypass': True,
+            **_get_base_opts(),
+            'postprocessors': [{'key': 'FFmpegMetadata', 'add_metadata': True}],
         }
-        
-        entries = []
         try:
-            with yt_dlp.YoutubeDL(search_opts) as ydl:
-                search_results = ydl.extract_info(f"ytsearch5:{query}", download=False)
-                if search_results and 'entries' in search_results:
-                    entries = list(search_results['entries'])
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(request.youtube_url, download=True)
+                ext = info.get('ext', 'm4a')
+                candidate_file = os.path.join(TEMP_DIR, f"{base_filename}.{ext}")
+                if os.path.exists(candidate_file):
+                    downloaded_file = candidate_file
+                    print(f"[Backend] Download direto concluído: {downloaded_file}")
         except Exception as e:
-            print(f"[Backend] Erro ao buscar '{query}': {e}")
-            continue
-            
-        if not entries:
-            print(f"[Backend] Nenhum resultado para '{query}'")
-            continue
+            print(f"[Backend] Falha no download direto: {e}")
+            # Cai no fluxo normal de busca se o download direto falhar
 
-        # Se for o primeiro termo de busca e skip_match for fornecido, pulamos os primeiros N resultados
-        start_idx = request.skip_match if (request.skip_match and request.skip_match > 0 and attempt_idx == 0) else 0
-        if start_idx >= len(entries):
-            # Se skip_match for maior que a lista, reduzimos ou pegamos o último para não ficar sem nada
-            start_idx = max(0, len(entries) - 1)
+    # ── Fluxo normal: busca por queries ──────────────────────────────────────
+    if not downloaded_file:
+        for attempt_idx, query in enumerate(queries):
+            print(f"[Backend] Tentando busca ({attempt_idx + 1}/{len(queries)}): {query}")
             
-        # Tentamos baixar cada vídeo retornado na busca
-        for entry_idx in range(start_idx, len(entries)):
-            entry = entries[entry_idx]
-            video_id = entry.get('id') or entry.get('url')
-            if not video_id:
-                continue
-                
-            video_url = f"https://www.youtube.com/watch?v={video_id}" if not video_id.startswith('http') else video_id
-            print(f"[Backend] Tentando baixar video ({entry_idx + 1}/{len(entries)}): {video_url}")
-            
-            # Filtro de duração opcional na primeira tentativa da primeira query para maior fidelidade
-            use_duration_filter = (request.duration_ms and request.duration_ms > 0 and attempt_idx == 0 and entry_idx == start_idx)
-            
-            ydl_opts = {
-                'format': 'm4a/bestaudio/best',
-                'outtmpl': os.path.join(TEMP_DIR, f"{base_filename}.%(ext)s"),
+            # Buscamos os primeiros 5 resultados (sem baixar) usando o prefixo ytsearch5:
+            search_opts = {
+                'extract_flat': True,
                 'quiet': True,
                 'no_warnings': True,
-                'noplaylist': True,
-                'extract_audio': True,
-                'audio_format': 'm4a',
                 'nocheckcertificate': True,
                 'geo_bypass': True,
-                'postprocessors': [{
-                    'key': 'FFmpegMetadata',
-                    'add_metadata': True,
-                }],
+                **_get_base_opts(),
             }
             
-            if use_duration_filter:
-                ydl_opts['match_filter'] = yt_dlp.utils.match_filter_func(
-                    lambda info: 'duration' in info and (
-                        abs(info['duration'] - request.duration_ms / 1000) < 60
-                    )
-                )
-                
+            entries = []
             try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(video_url, download=True)
-                    ext = info.get('ext', 'm4a')
-                    candidate_file = os.path.join(TEMP_DIR, f"{base_filename}.{ext}")
-                    
-                    if os.path.exists(candidate_file):
-                        print(f"[Backend] Sucesso! Baixado: {video_url}")
-                        downloaded_file = candidate_file
-                        break
+                with yt_dlp.YoutubeDL(search_opts) as ydl:
+                    search_results = ydl.extract_info(f"ytsearch5:{query}", download=False)
+                    if search_results and 'entries' in search_results:
+                        entries = list(search_results['entries'])
             except Exception as e:
-                print(f"[Backend] Falha ao baixar {video_url}: {e}")
-                # Limpa arquivos parciais/resíduos se existirem para evitar erros nas próximas tentativas
-                for ext in ['m4a', 'webm', 'mp3', 'part', 'ytdl']:
-                    residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext}")
-                    if os.path.exists(residual):
-                        try: os.remove(residual)
-                        except: pass
+                print(f"[Backend] Erro ao buscar '{query}': {e}")
                 continue
-        
-        if downloaded_file:
-            break
+                
+            if not entries:
+                print(f"[Backend] Nenhum resultado para '{query}'")
+                continue
+    
+            # Se for o primeiro termo de busca e skip_match for fornecido, pulamos os primeiros N resultados
+            start_idx = request.skip_match if (request.skip_match and request.skip_match > 0 and attempt_idx == 0) else 0
+            if start_idx >= len(entries):
+                # Se skip_match for maior que a lista, reduzimos ou pegamos o último para não ficar sem nada
+                start_idx = max(0, len(entries) - 1)
+                
+            # Tentamos baixar cada vídeo retornado na busca
+            for entry_idx in range(start_idx, len(entries)):
+                entry = entries[entry_idx]
+                video_id = entry.get('id') or entry.get('url')
+                if not video_id:
+                    continue
+                    
+                video_url = f"https://www.youtube.com/watch?v={video_id}" if not video_id.startswith('http') else video_id
+                print(f"[Backend] Tentando baixar video ({entry_idx + 1}/{len(entries)}): {video_url}")
+                
+                # Filtro de duração opcional na primeira tentativa da primeira query para maior fidelidade
+                use_duration_filter = (request.duration_ms and request.duration_ms > 0 and attempt_idx == 0 and entry_idx == start_idx)
+                
+                ydl_opts = {
+                    'format': 'm4a/bestaudio/best',
+                    'outtmpl': os.path.join(TEMP_DIR, f"{base_filename}.%(ext)s"),
+                    'quiet': True,
+                    'no_warnings': True,
+                    'noplaylist': True,
+                    'extract_audio': True,
+                    'audio_format': 'm4a',
+                    'nocheckcertificate': True,
+                    'geo_bypass': True,
+                    **_get_base_opts(),
+                    'postprocessors': [{
+                        'key': 'FFmpegMetadata',
+                        'add_metadata': True,
+                    }],
+                }
+                
+                if use_duration_filter:
+                    ydl_opts['match_filter'] = yt_dlp.utils.match_filter_func(
+                        lambda info: 'duration' in info and (
+                            abs(info['duration'] - request.duration_ms / 1000) < 60
+                        )
+                    )
+                    
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(video_url, download=True)
+                        ext = info.get('ext', 'm4a')
+                        candidate_file = os.path.join(TEMP_DIR, f"{base_filename}.{ext}")
+                        
+                        if os.path.exists(candidate_file):
+                            print(f"[Backend] Sucesso! Baixado: {video_url}")
+                            downloaded_file = candidate_file
+                            break
+                except Exception as e:
+                    print(f"[Backend] Falha ao baixar {video_url}: {e}")
+                    # Limpa arquivos parciais/resíduos se existirem para evitar erros nas próximas tentativas
+                    for ext in ['m4a', 'webm', 'mp3', 'part', 'ytdl']:
+                        residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext}")
+                        if os.path.exists(residual):
+                            try: os.remove(residual)
+                            except: pass
+                    continue
+            
+            if downloaded_file:
+                break
+
 
     # Se todas as queries e vídeos falharem, levantamos erro
     if not downloaded_file or not os.path.exists(downloaded_file):
