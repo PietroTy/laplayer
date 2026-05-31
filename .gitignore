@@ -1,0 +1,24 @@
+# ===========================================================================
+# laPlayer - Git Distribution Config
+# Ignore everything except release distribution artifacts & configurations
+# ===========================================================================
+
+# Ignore all files and directories by default
+*
+
+# Allow scanning of directories so whitelisted files inside them are found
+!*/
+
+# Whitelist distribution files
+!.gitignore
+!README.md
+!server_url.txt
+!app-release.apk
+
+# Also whitelist the original compiled APK path in the build outputs
+!mobile/
+!mobile/build/
+!mobile/build/app/
+!mobile/build/app/outputs/
+!mobile/build/app/outputs/flutter-apk/
+!mobile/build/app/outputs/flutter-apk/app-release.apk
