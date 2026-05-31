@@ -145,4 +145,43 @@ class SpotifyService {
       throw 'Falha ao baixar músicas: $e';
     }
   }
+
+  /// Busca metadados de uma música no Spotify usando busca textual livre.
+  Future<Map<String, dynamic>?> searchTrackMetadata(String query) async {
+    try {
+      final token = await _getToken();
+      if (token == null) return null;
+
+      final client = HttpClient();
+      final url = 'https://api.spotify.com/v1/search?q=${Uri.encodeComponent(query)}&type=track&limit=1';
+      final request = await client.getUrl(Uri.parse(url));
+      request.headers.set('Authorization', 'Bearer $token');
+      
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+      final data = jsonDecode(responseBody);
+
+      if (response.statusCode != 200) return null;
+      final List items = data['tracks']?['items'] ?? [];
+      if (items.isEmpty) return null;
+      
+      final track = items.first;
+      final artists = (track['artists'] as List? ?? []).map((a) => a['name']).join(', ');
+      final album = track['album']?['name'] ?? '';
+      final images = track['album']?['images'] as List? ?? [];
+      final albumArt = images.isNotEmpty ? images[0]['url'] : null;
+      final releaseDate = track['album']?['release_date'] ?? '';
+
+      return {
+        'title': track['name'],
+        'artist': artists,
+        'album': album,
+        'albumArtUrl': albumArt,
+        'durationMs': track['duration_ms'],
+        'releaseYear': releaseDate.split('-').first,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
 }

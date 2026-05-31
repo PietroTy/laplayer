@@ -10,6 +10,7 @@ import '../data/models/track.dart';
 import '../providers/player_provider.dart';
 import '../data/services/lyrics_service.dart';
 import '../data/services/sync_service.dart';
+import 'widgets/track_tile.dart';
 
 class PlayerScreen extends ConsumerWidget {
   const PlayerScreen({super.key});
@@ -362,14 +363,18 @@ class PlayerScreen extends ConsumerWidget {
                 },
               ),
             ListTile(
-              leading: const Icon(Icons.info_outline_rounded, color: AppColors.textSecond),
-              title: const Text('Informações',
+              leading: Icon(Icons.info_outline_rounded, color: AppColors.accent),
+              title: const Text('Sobre a música',
                 style: TextStyle(color: AppColors.textPrimary),
               ),
               subtitle: Text(
-                '${track.releaseYear}  •  ${track.genres.take(2).join(', ')}',
+                '${track.releaseYear}  •  ${track.genres.take(2).join(', ')}  •  Toque para ver tudo',
                 style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
               ),
+              onTap: () {
+                Navigator.pop(context); // fecha o bottom sheet de opcoes
+                showTrackInfoSheet(context, ref, track);
+              },
             ),
             const SizedBox(height: 16),
           ],

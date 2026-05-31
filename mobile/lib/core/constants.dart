@@ -51,5 +51,11 @@ abstract class AppConstants {
     }
     return getDefaultMusicDirectory();
   }
+
+  /// Atualiza o diretório de música configurado pelo usuário.
+  static Future<void> setMusicDirectory(String path) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('custom_music_directory', path);
+  }
 }
 

@@ -4,12 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/theme.dart';
+import '../data/database/database.dart';
+import '../data/models/album_group.dart';
+import '../data/models/artist_group.dart';
 import '../data/models/player_state.dart' as app;
 import '../data/models/playlist.dart';
+import '../data/models/track.dart';
 import '../data/services/sync_service.dart';
+import '../data/services/manifest_service.dart';
 import '../providers/library_provider.dart';
 import '../providers/player_provider.dart';
 import 'widgets/track_tile.dart';
+import 'widgets/album_grid_view.dart';
+import 'widgets/artist_list_view.dart';
 
 class PlaylistScreen extends ConsumerStatefulWidget {
   final String playlistId;
@@ -26,18 +33,73 @@ class PlaylistScreen extends ConsumerStatefulWidget {
   ConsumerState<PlaylistScreen> createState() => _PlaylistScreenState();
 }
 
-class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
+enum _SearchFilter { all, downloaded, pending, albums, artists, genres }
+
+const _filterLabels = {
+  _SearchFilter.all:        ('Todos',     Icons.library_music_rounded),
+  _SearchFilter.downloaded: ('Baixadas',  Icons.check_circle_rounded),
+  _SearchFilter.pending:    ('Pendentes', Icons.schedule_rounded),
+  _SearchFilter.albums:     ('Álbuns',    Icons.album_rounded),
+  _SearchFilter.artists:    ('Artistas',  Icons.person_rounded),
+  _SearchFilter.genres:     ('Gêneros',   Icons.style_rounded),
+};
+
+class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
+    with SingleTickerProviderStateMixin {
   bool _hasScrolledToHighlight = false;
   final ScrollController _scrollController = ScrollController();
-  String _searchQuery = "";
+  String _searchQuery = '';
   bool _isScrolling = false;
   double _velocity = 0;
   Timer? _debounce;
+  _SearchFilter _activeFilter = _SearchFilter.all;
+
+  // Para vistas de álbuns/artistas
+  List<AlbumGroup> _albumResults = [];
+  List<ArtistGroup> _artistResults = [];
+  bool _groupLoading = false;
+
+  // Reordenação por arrastar e auto-scroll acelerado nas bordas
+  Timer? _autoScrollTimer;
+  double _currentPointerY = 0;
+  bool _isReordering = false;
+  List<Track>? _localTracks;
+  String? _loadedPlaylistId;
+
+  void _startAutoScrollTimer() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
+      if (!_isReordering || !mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      final screenHeight = MediaQuery.of(context).size.height;
+      final topThreshold = screenHeight * 0.25; // 25% do topo
+      final bottomThreshold = screenHeight * 0.85; // 85% da base
+      
+      if (_currentPointerY > bottomThreshold) {
+        // Arrasta para baixo -> desce rápido
+        final proximity = (_currentPointerY - bottomThreshold) / (screenHeight - bottomThreshold);
+        // Velocidade máxima de 50px por frame (cerca de 3000px por segundo!)
+        final scrollDelta = 12.0 + (proximity * 38.0); 
+        final target = _scrollController.offset + scrollDelta;
+        _scrollController.jumpTo(target.clamp(0.0, _scrollController.position.maxScrollExtent));
+      } else if (_currentPointerY < topThreshold && _currentPointerY > 80) {
+        // Arrasta para cima -> sobe rápido
+        final proximity = (topThreshold - _currentPointerY) / (topThreshold - 80);
+        final scrollDelta = 12.0 + (proximity * 38.0);
+        final target = _scrollController.offset - scrollDelta;
+        _scrollController.jumpTo(target.clamp(0.0, _scrollController.position.maxScrollExtent));
+      }
+    });
+  }
 
   @override
   void dispose() {
     _scrollController.dispose();
     _debounce?.cancel();
+    _autoScrollTimer?.cancel();
     super.dispose();
   }
 
@@ -45,16 +107,50 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
     if (_debounce?.isActive ?? false) _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () {
       if (mounted) {
-        setState(() {
-          _searchQuery = query;
-        });
+        setState(() => _searchQuery = query);
+        _loadGroupedResults(query);
       }
     });
+  }
+
+  void _setFilter(_SearchFilter filter) {
+    setState(() => _activeFilter = filter);
+    _loadGroupedResults(_searchQuery);
+  }
+
+  Future<void> _loadGroupedResults(String query) async {
+    if (_activeFilter != _SearchFilter.albums &&
+        _activeFilter != _SearchFilter.artists) return;
+    setState(() => _groupLoading = true);
+    if (_activeFilter == _SearchFilter.albums) {
+      final res = await AppDatabase.instance.searchAlbums(
+        query.isEmpty ? '' : query,
+        playlistId: widget.playlistId,
+      );
+      if (mounted) setState(() { _albumResults = res; _groupLoading = false; });
+    } else {
+      final res = await AppDatabase.instance.searchArtists(
+        query.isEmpty ? '' : query,
+        playlistId: widget.playlistId,
+      );
+      if (mounted) setState(() { _artistResults = res; _groupLoading = false; });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final tracksAsync = ref.watch(playlistTracksProvider(widget.playlistId));
+    final tracksVal = tracksAsync.value;
+    if (tracksVal != null) {
+      final idsEqual = _localTracks != null &&
+          _localTracks!.length == tracksVal.length &&
+          _localTracks!.asMap().entries.every((entry) => entry.value.id == tracksVal[entry.key].id);
+
+      if (_loadedPlaylistId != widget.playlistId || _localTracks == null || !idsEqual) {
+        _localTracks = List<Track>.from(tracksVal);
+        _loadedPlaylistId = widget.playlistId;
+      }
+    }
     final syncState   = ref.watch(syncProvider);
     final playlistDetailsAsync = ref.watch(playlistDetailsProvider(widget.playlistId));
     final playlistDetails = playlistDetailsAsync.value;
@@ -78,7 +174,8 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
       body: tracksAsync.when(
         loading: () => Center(child: CircularProgressIndicator(color: AppColors.accent)),
         error: (e, _) => Center(child: Text('$e', style: const TextStyle(color: AppColors.error))),
-        data: (tracks) {
+        data: (ignoredTracks) {
+          final tracks = _localTracks ?? ignoredTracks;
           final filteredTracks = _searchQuery.isEmpty
               ? tracks
               : tracks.where((t) =>
@@ -108,29 +205,37 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
             }
           }
 
-          return NotificationListener<ScrollNotification>(
-            onNotification: (notification) {
-              if (notification is ScrollStartNotification) {
-                setState(() => _isScrolling = true);
-              } else if (notification is ScrollUpdateNotification) {
-                final v = notification.scrollDelta?.abs() ?? 0;
-                if (v > 50 && !_isScrolling) setState(() => _isScrolling = true);
-                _velocity = v;
-              } else if (notification is ScrollEndNotification) {
-                setState(() { _isScrolling = false; _velocity = 0; });
-              }
-              return false;
+          return Listener(
+            onPointerDown: (event) {
+              _currentPointerY = event.position.dy;
             },
-            child: RawScrollbar(
-              controller: _scrollController,
-              thumbVisibility: true,
-              thickness: 6,
-              padding: const EdgeInsets.only(top: 100, bottom: 100, right: 2),
-              radius: const Radius.circular(3),
-              thumbColor: AppColors.accent.withOpacity(0.5),
-              child: CustomScrollView(
+            onPointerMove: (event) {
+              _currentPointerY = event.position.dy;
+            },
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (notification) {
+                if (notification is ScrollStartNotification) {
+                  setState(() => _isScrolling = true);
+                } else if (notification is ScrollUpdateNotification) {
+                  final v = notification.scrollDelta?.abs() ?? 0;
+                  if (v > 50 && !_isScrolling) setState(() => _isScrolling = true);
+                  _velocity = v;
+                } else if (notification is ScrollEndNotification) {
+                  setState(() { _isScrolling = false; _velocity = 0; });
+                }
+                return false;
+              },
+              child: RawScrollbar(
                 controller: _scrollController,
-                slivers: [
+                thumbVisibility: true,
+                thickness: 12,
+                padding: const EdgeInsets.only(top: 100, bottom: 100, right: 2),
+                radius: const Radius.circular(6),
+                thumbColor: AppColors.accent.withOpacity(0.7),
+                interactive: true,
+                child: CustomScrollView(
+                  controller: _scrollController,
+                  slivers: [
                   // ── Header ────────────────────────────────────────────────
                   SliverAppBar(
                     pinned: true,
@@ -362,49 +467,191 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                           ),
                           const SizedBox(height: 16),
 
-                          // 5. Search Input Bar
-                          SizedBox(
-                            height: 40,
-                            child: TextField(
-                              onChanged: _onSearchChanged,
-                              style: const TextStyle(color: Colors.white, fontSize: 13),
-                              decoration: InputDecoration(
-                                hintText: 'Buscar na playlist...',
-                                hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
-                                prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.textMuted),
-                                filled: true,
-                                fillColor: AppColors.surface,
-                                contentPadding: EdgeInsets.zero,
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide.none,
+                           // 5. Search + Filter Bar
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Barra de busca
+                              SizedBox(
+                                height: 40,
+                                child: TextField(
+                                  onChanged: _onSearchChanged,
+                                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                                  decoration: InputDecoration(
+                                    hintText: 'Buscar na playlist...',
+                                    hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                                    prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.textMuted),
+                                    filled: true,
+                                    fillColor: AppColors.surface,
+                                    contentPadding: EdgeInsets.zero,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
+                              const SizedBox(height: 10),
+                              // Chips de filtro
+                              SizedBox(
+                                height: 32,
+                                child: ListView(
+                                  scrollDirection: Axis.horizontal,
+                                  children: _SearchFilter.values.map((filter) {
+                                    final (label, icon) = _filterLabels[filter]!;
+                                    final isSelected = _activeFilter == filter;
+                                    return Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 180),
+                                        child: FilterChip(
+                                          avatar: Icon(icon, size: 14,
+                                            color: isSelected ? Colors.black : AppColors.textMuted,
+                                          ),
+                                          label: Text(label, style: TextStyle(
+                                            fontSize: 12,
+                                            color: isSelected ? Colors.black : AppColors.textSecond,
+                                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.normal,
+                                          )),
+                                          selected: isSelected,
+                                          onSelected: (_) => _setFilter(filter),
+                                          selectedColor: AppColors.accent,
+                                          backgroundColor: AppColors.surface,
+                                          checkmarkColor: Colors.black,
+                                          side: BorderSide(
+                                            color: isSelected ? AppColors.accent : AppColors.border,
+                                            width: 1,
+                                          ),
+                                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
                     ),
                   ),
 
-                  // ── List ──────────────────────────────────────────────────
-                  SliverPadding(
-                    padding: const EdgeInsets.only(bottom: 100),
-                    sliver: SliverFixedExtentList(
-                      itemExtent: 72,
-                      delegate: SliverChildBuilderDelegate(
-                        (context, i) {
-                          if (_isScrolling && _velocity > 250) return const _TrackPlaceholder();
-                          return TrackTile(track: filteredTracks[i], queue: allAvailableTracks, showIndex: true);
-                        },
-                        childCount: filteredTracks.length,
-                      ),
+                  // ── List or Group View ────────────────────────────────────
+                  if (_activeFilter == _SearchFilter.albums)
+                    SliverToBoxAdapter(
+                      child: _groupLoading
+                          ? const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 40),
+                              child: Center(child: CircularProgressIndicator()),
+                            )
+                          : AlbumGridView(
+                              albums: _albumResults,
+                              playlistNames: {widget.playlistId: widget.playlistName},
+                            ),
+                    )
+                  else if (_activeFilter == _SearchFilter.artists)
+                    SliverToBoxAdapter(
+                      child: _groupLoading
+                          ? const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 40),
+                              child: Center(child: CircularProgressIndicator()),
+                            )
+                          : ArtistListView(
+                              artists: _artistResults,
+                              playlistId: widget.playlistId,
+                            ),
+                    )
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.only(bottom: 100),
+                      sliver: () {
+                        final visibleTracks = _activeFilter == _SearchFilter.downloaded
+                            ? filteredTracks.where((t) => t.isCached).toList()
+                            : _activeFilter == _SearchFilter.pending
+                                ? filteredTracks.where((t) => !t.isCached).toList()
+                                : _activeFilter == _SearchFilter.genres
+                                    ? (_searchQuery.isEmpty
+                                        ? tracks
+                                        : tracks.where((t) => t.genres.any((g) => g.toLowerCase().contains(_searchQuery.toLowerCase()))).toList())
+                                    : filteredTracks;
+                        final isDefaultView = _activeFilter == _SearchFilter.all && _searchQuery.isEmpty;
+                        if (isDefaultView) {
+                          return SliverReorderableList(
+                            itemBuilder: (context, i) {
+                              final track = visibleTracks[i];
+                              return ReorderableDelayedDragStartListener(
+                                index: i,
+                                key: ValueKey(track.id),
+                                child: TrackTile(
+                                  key: ValueKey(track.id),
+                                  track: track,
+                                  queue: allAvailableTracks,
+                                  showIndex: true,
+                                ),
+                              );
+                            },
+                            itemCount: visibleTracks.length,
+                            onReorderStart: (index) {
+                              setState(() {
+                                _isReordering = true;
+                              });
+                              _startAutoScrollTimer();
+                            },
+                            onReorderEnd: (index) {
+                              setState(() {
+                                _isReordering = false;
+                              });
+                              _autoScrollTimer?.cancel();
+                            },
+                            onReorder: (oldIndex, newIndex) async {
+                              if (oldIndex == newIndex) return;
+                              if (newIndex > oldIndex) {
+                                newIndex -= 1;
+                              }
+                              
+                              if (_localTracks != null) {
+                                setState(() {
+                                  final movedTrack = _localTracks!.removeAt(oldIndex);
+                                  _localTracks!.insert(newIndex, movedTrack);
+                                });
+                                
+                                // Persistência das posições
+                                final ids = _localTracks!.map((t) => t.id).toList();
+                                await AppDatabase.instance.updateTrackPositions(ids);
+                                
+                                // Salva manifesto no disco
+                                ManifestService.instance.scheduleSave();
+                                
+                                ref.invalidate(playlistTracksProvider(widget.playlistId));
+                              }
+                            },
+                          );
+                        } else {
+                          return SliverFixedExtentList(
+                            itemExtent: 72,
+                            delegate: SliverChildBuilderDelegate(
+                              (context, i) {
+                                if (_isScrolling && _velocity > 250) return const _TrackPlaceholder();
+                                if (i >= visibleTracks.length) return null;
+                                return TrackTile(
+                                  key: ValueKey(visibleTracks[i].id),
+                                  track: visibleTracks[i],
+                                  queue: allAvailableTracks,
+                                  showIndex: true,
+                                );
+                              },
+                              childCount: visibleTracks.length,
+                            ),
+                          );
+                        }
+                      }(),
                     ),
-                  ),
                 ],
               ),
             ),
-          );
+          ),
+        );
         },
       ),
     );
@@ -425,120 +672,153 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
     final nameController = TextEditingController(text: playlist.name);
     final descController = TextEditingController(text: playlist.description);
     final urlController = TextEditingController(text: playlist.imageUrl);
+    bool syncDisabledVal = playlist.syncDisabled;
 
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          backgroundColor: AppColors.surface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text(
-            'Editar Playlist',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text('Nome', style: TextStyle(color: AppColors.textSecond, fontSize: 12)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: nameController,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    hintText: 'Minha super playlist',
-                    hintStyle: const TextStyle(color: AppColors.textMuted),
-                    filled: true,
-                    fillColor: AppColors.bg,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: AppColors.surface,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Text(
+                'Editar Playlist',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text('Nome', style: TextStyle(color: AppColors.textSecond, fontSize: 12)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: nameController,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        hintText: 'Minha super playlist',
+                        hintStyle: const TextStyle(color: AppColors.textMuted),
+                        filled: true,
+                        fillColor: AppColors.bg,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  ),
+                    const SizedBox(height: 16),
+                    const Text('Descrição', style: TextStyle(color: AppColors.textSecond, fontSize: 12)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: descController,
+                      maxLines: 3,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        hintText: 'Uma playlist incrível...',
+                        hintStyle: const TextStyle(color: AppColors.textMuted),
+                        filled: true,
+                        fillColor: AppColors.bg,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('URL da Foto (Capa)', style: TextStyle(color: AppColors.textSecond, fontSize: 12)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: urlController,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'https://exemplo.com/foto.jpg',
+                        hintStyle: const TextStyle(color: AppColors.textMuted),
+                        filled: true,
+                        fillColor: AppColors.bg,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Desativar Sync do Spotify',
+                                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                              SizedBox(height: 2),
+                              Text('Impede que atualizações do Spotify sobrescrevam suas faixas do YouTube.',
+                                  style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: syncDisabledVal,
+                          activeColor: AppColors.accent,
+                          onChanged: (val) {
+                            setDialogState(() {
+                              syncDisabledVal = val;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-                const Text('Descrição', style: TextStyle(color: AppColors.textSecond, fontSize: 12)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: descController,
-                  maxLines: 3,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    hintText: 'Uma playlist incrível...',
-                    hintStyle: const TextStyle(color: AppColors.textMuted),
-                    filled: true,
-                    fillColor: AppColors.bg,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
                 ),
-                const SizedBox(height: 16),
-                const Text('URL da Foto (Capa)', style: TextStyle(color: AppColors.textSecond, fontSize: 12)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: urlController,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: 'https://exemplo.com/foto.jpg',
-                    hintStyle: const TextStyle(color: AppColors.textMuted),
-                    filled: true,
-                    fillColor: AppColors.bg,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
+                  onPressed: () async {
+                    final name = nameController.text.trim();
+                    if (name.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('O nome da playlist não pode ser vazio.'), backgroundColor: AppColors.error),
+                      );
+                      return;
+                    }
+
+                    Navigator.pop(context);
+
+                    // Mostra indicador de carregamento
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Salvando alterações...'), duration: Duration(milliseconds: 500)),
+                    );
+
+                    await ref.read(libraryProvider.notifier).updatePlaylistDetails(
+                      playlistId: playlist.id,
+                      name: name,
+                      description: descController.text.trim(),
+                      imageUrl: urlController.text.trim(),
+                      syncDisabled: syncDisabledVal,
+                    );
+
+                    ref.invalidate(playlistDetailsProvider(playlist.id));
+                  },
+                  child: const Text('Salvar', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
-                foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: () async {
-                final name = nameController.text.trim();
-                if (name.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('O nome da playlist não pode ser vazio.'), backgroundColor: AppColors.error),
-                  );
-                  return;
-                }
-
-                Navigator.pop(context);
-
-                // Mostra indicador de carregamento
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Salvando alterações...'), duration: Duration(milliseconds: 500)),
-                );
-
-                await ref.read(libraryProvider.notifier).updatePlaylistDetails(
-                  playlistId: playlist.id,
-                  name: name,
-                  description: descController.text.trim(),
-                  imageUrl: urlController.text.trim(),
-                );
-
-                ref.invalidate(playlistDetailsProvider(playlist.id));
-              },
-              child: const Text('Salvar', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
+            );
+          },
         );
       },
     );

@@ -4,16 +4,21 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-
-
 import '../core/theme.dart';
 import '../data/database/database.dart';
+import '../data/models/album_group.dart';
+import '../data/models/artist_group.dart';
 import '../data/models/track.dart';
 import '../data/services/search_service.dart';
 import '../data/services/server_downloader.dart';
 import '../providers/library_provider.dart';
 import '../providers/player_provider.dart';
+import '../data/services/spotify_service.dart';
+import '../data/services/lyrics_service.dart';
+import '../data/services/manifest_service.dart';
 import 'widgets/track_tile.dart';
+import 'widgets/album_grid_view.dart';
+import 'widgets/artist_list_view.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
 
@@ -21,6 +26,17 @@ final _remoteSearchResultsProvider =
     StateProvider<List<RemoteTrack>>((ref) => []);
 final _remoteSearchLoadingProvider = StateProvider<bool>((ref) => false);
 final _remoteSearchErrorProvider = StateProvider<String?>((ref) => null);
+
+enum _SearchFilter { all, downloaded, pending, albums, artists, genres }
+
+const _filterLabels = {
+  _SearchFilter.all:        ('Todos',     Icons.library_music_rounded),
+  _SearchFilter.downloaded: ('Baixadas',  Icons.check_circle_rounded),
+  _SearchFilter.pending:    ('Pendentes', Icons.schedule_rounded),
+  _SearchFilter.albums:     ('Álbuns',    Icons.album_rounded),
+  _SearchFilter.artists:    ('Artistas',  Icons.person_rounded),
+  _SearchFilter.genres:     ('Gêneros',   Icons.style_rounded),
+};
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
@@ -38,7 +54,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
 
   // Local search state
   List<Track> _localResults = [];
+  List<AlbumGroup> _albumResults = [];
+  List<ArtistGroup> _artistResults = [];
   Map<String, String> _playlistNames = {};
+  _SearchFilter _activeFilter = _SearchFilter.all;
+  bool _groupLoading = false;
 
   // Debounce for local search
   Timer? _debounce;
@@ -47,6 +67,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     _loadPlaylistNames();
   }
 
@@ -81,11 +104,47 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
 
   Future<void> _searchLocal(String query) async {
     if (query.trim().length < 2) {
-      setState(() => _localResults = []);
+      setState(() {
+        _localResults = [];
+        _albumResults = [];
+        _artistResults = [];
+      });
       return;
     }
-    final results = await AppDatabase.instance.searchTracks(query);
-    if (mounted) setState(() => _localResults = results);
+
+    // Filtra conforme o modo ativo
+    if (_activeFilter == _SearchFilter.albums) {
+      setState(() => _groupLoading = true);
+      final res = await AppDatabase.instance.searchAlbums(query);
+      if (mounted) setState(() { _albumResults = res; _groupLoading = false; });
+    } else if (_activeFilter == _SearchFilter.artists) {
+      setState(() => _groupLoading = true);
+      final res = await AppDatabase.instance.searchArtists(query);
+      if (mounted) setState(() { _artistResults = res; _groupLoading = false; });
+    } else if (_activeFilter == _SearchFilter.genres) {
+      final res = await AppDatabase.instance.searchTracksByGenre(query);
+      if (mounted) setState(() => _localResults = res);
+    } else {
+      final res = await AppDatabase.instance.searchTracks(
+        query,
+        cachedOnly: _activeFilter == _SearchFilter.downloaded
+            ? true
+            : _activeFilter == _SearchFilter.pending
+                ? false
+                : null,
+      );
+      if (mounted) setState(() => _localResults = res);
+    }
+  }
+
+  void _setFilter(_SearchFilter filter) {
+    setState(() {
+      _activeFilter = filter;
+      _localResults = [];
+      _albumResults = [];
+      _artistResults = [];
+    });
+    _searchLocal(_controller.text);
   }
 
   Future<void> _searchRemote() async {
@@ -119,12 +178,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
           autofocus: true,
           onChanged: _onQueryChanged,
           onSubmitted: (_) {
-            // When user presses Enter/Search on keyboard, search the active tab
             if (_tabController.index == 1) _searchRemote();
           },
           style: const TextStyle(color: Colors.white, fontSize: 15),
           decoration: InputDecoration(
-            hintText: 'Buscar músicas...',
+            hintText: 'Buscar músicas, álbuns, artistas...',
             hintStyle: const TextStyle(color: AppColors.textMuted),
             border: InputBorder.none,
             contentPadding: const EdgeInsets.symmetric(vertical: 14),
@@ -134,22 +192,74 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
                     icon: const Icon(Icons.clear_rounded, color: AppColors.textMuted, size: 18),
                     onPressed: () {
                       _controller.clear();
-                      setState(() => _localResults = []);
+                      setState(() {
+                        _localResults = [];
+                        _albumResults = [];
+                        _artistResults = [];
+                      });
                       ref.read(_remoteSearchResultsProvider.notifier).state = [];
                     },
                   )
                 : null,
           ),
         ),
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: AppColors.accent,
-          labelColor: AppColors.accent,
-          unselectedLabelColor: AppColors.textMuted,
-          tabs: const [
-            Tab(icon: Icon(Icons.library_music_rounded, size: 18), text: 'Biblioteca'),
-            Tab(icon: Icon(Icons.youtube_searched_for_rounded, size: 18), text: 'YouTube'),
-          ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(88),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TabBar(
+                controller: _tabController,
+                indicatorColor: AppColors.accent,
+                labelColor: AppColors.accent,
+                unselectedLabelColor: AppColors.textMuted,
+                tabs: const [
+                  Tab(icon: Icon(Icons.library_music_rounded, size: 18), text: 'Biblioteca'),
+                  Tab(icon: Icon(Icons.youtube_searched_for_rounded, size: 18), text: 'YouTube'),
+                ],
+              ),
+              // Chips de filtro (só na aba Biblioteca)
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                child: _tabController.index == 0
+                    ? SizedBox(
+                        height: 40,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          children: _SearchFilter.values.map((filter) {
+                            final (label, icon) = _filterLabels[filter]!;
+                            final isSelected = _activeFilter == filter;
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: FilterChip(
+                                avatar: Icon(icon, size: 13,
+                                  color: isSelected ? Colors.black : AppColors.textMuted),
+                                label: Text(label, style: TextStyle(
+                                  fontSize: 11,
+                                  color: isSelected ? Colors.black : AppColors.textSecond,
+                                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.normal,
+                                )),
+                                selected: isSelected,
+                                onSelected: (_) => _setFilter(filter),
+                                selectedColor: AppColors.accent,
+                                backgroundColor: AppColors.surface,
+                                checkmarkColor: Colors.black,
+                                side: BorderSide(
+                                  color: isSelected ? AppColors.accent : AppColors.border,
+                                  width: 1,
+                                ),
+                                padding: const EdgeInsets.symmetric(horizontal: 2),
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
         ),
       ),
       body: TabBarView(
@@ -157,8 +267,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
         children: [
           _LocalSearchTab(
             results: _localResults,
+            albumResults: _albumResults,
+            artistResults: _artistResults,
             query: _controller.text,
             playlistNames: _playlistNames,
+            filter: _activeFilter,
+            groupLoading: _groupLoading,
             ref: ref,
           ),
           _RemoteSearchTab(
@@ -175,14 +289,22 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
 
 class _LocalSearchTab extends StatelessWidget {
   final List<Track> results;
+  final List<AlbumGroup> albumResults;
+  final List<ArtistGroup> artistResults;
   final String query;
   final Map<String, String> playlistNames;
+  final _SearchFilter filter;
+  final bool groupLoading;
   final WidgetRef ref;
 
   const _LocalSearchTab({
     required this.results,
+    required this.albumResults,
+    required this.artistResults,
     required this.query,
     required this.playlistNames,
+    required this.filter,
+    required this.groupLoading,
     required this.ref,
   });
 
@@ -192,14 +314,36 @@ class _LocalSearchTab extends StatelessWidget {
       return _Placeholder(
         icon: Icons.library_music_rounded,
         title: 'Sua biblioteca',
-        subtitle: 'Digite pelo menos 2 caracteres para buscar nas músicas baixadas.',
+        subtitle: 'Digite pelo menos 2 caracteres para buscar.',
       );
     }
+
+    // Vista de álbuns
+    if (filter == _SearchFilter.albums) {
+      if (groupLoading) return const Center(child: CircularProgressIndicator());
+      return AlbumGridView(albums: albumResults, playlistNames: playlistNames);
+    }
+
+    // Vista de artistas
+    if (filter == _SearchFilter.artists) {
+      if (groupLoading) return const Center(child: CircularProgressIndicator());
+      return SingleChildScrollView(
+        child: ArtistListView(artists: artistResults),
+      );
+    }
+
+    // Vista de tracks (Todos / Baixadas / Pendentes)
     if (results.isEmpty) {
       return _Placeholder(
         icon: Icons.search_off_rounded,
         title: 'Nada encontrado',
-        subtitle: 'Tente buscar no YouTube pela aba ao lado.',
+        subtitle: filter == _SearchFilter.downloaded
+            ? 'Nenhuma música baixada com esse nome.'
+            : filter == _SearchFilter.pending
+                ? 'Nenhuma música pendente com esse nome.'
+                : filter == _SearchFilter.genres
+                    ? 'Nenhuma música encontrada com esse gênero.'
+                    : 'Tente buscar no YouTube pela aba ao lado.',
       );
     }
 
@@ -218,9 +362,7 @@ class _LocalSearchTab extends StatelessWidget {
                 playlistName,
                 style: TextStyle(
                   color: AppColors.accent.withOpacity(0.8),
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
+                  fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5,
                 ),
               ),
             ),
@@ -230,19 +372,15 @@ class _LocalSearchTab extends StatelessWidget {
               showIndex: false,
               onTap: () async {
                 try {
-                  final all = await AppDatabase.instance
-                      .getTracksForPlaylist(track.playlistId);
+                  final all = await AppDatabase.instance.getTracksForPlaylist(track.playlistId);
                   final available = all.where((t) => t.isCached).toList();
                   if (available.isEmpty && context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('Nenhuma música baixada nesta playlist.')),
+                      const SnackBar(content: Text('Nenhuma música baixada nesta playlist.')),
                     );
                     return;
                   }
-                  await ref
-                      .read(playerProvider.notifier)
-                      .playTrack(track, available);
+                  await ref.read(playerProvider.notifier).playTrack(track, available);
                 } catch (_) {}
               },
             ),
@@ -371,15 +509,42 @@ class _RemoteTrackTileState extends ConsumerState<_RemoteTrackTile> {
     setState(() {
       _downloading = true;
       _progress = 0;
-      _status = 'Iniciando...';
+      _status = 'Buscando metadados...';
     });
 
     try {
+      // 1. Busca metadados corretos no Spotify
+      String targetTitle = widget.track.title;
+      String targetArtist = widget.track.artist;
+      String targetAlbum = 'Não Encontrado';
+      String? targetArt = widget.track.thumbnail.isNotEmpty ? widget.track.thumbnail : null;
+      int targetDuration = widget.track.durationMs;
+      String targetYear = '';
+
+      try {
+        final spotifyMeta = await SpotifyService().searchTrackMetadata('${widget.track.artist} ${widget.track.title}');
+        if (spotifyMeta != null) {
+          targetTitle = spotifyMeta['title'] ?? targetTitle;
+          targetArtist = spotifyMeta['artist'] ?? targetArtist;
+          targetAlbum = spotifyMeta['album'] ?? targetAlbum;
+          targetArt = spotifyMeta['albumArtUrl'] ?? targetArt;
+          targetDuration = spotifyMeta['durationMs'] ?? targetDuration;
+          targetYear = spotifyMeta['releaseYear'] ?? '';
+        }
+      } catch (_) {
+        // Fallback seguro caso falhe a busca no Spotify
+      }
+
+      setState(() {
+        _status = 'Iniciando download...';
+      });
+
+      // 2. Realiza o download físico do arquivo de áudio
       final file = await ServerDownloader().downloadTrack(
-        title: widget.track.title,
-        artist: widget.track.artist,
-        album: '',
-        imageUrl: widget.track.thumbnail.isNotEmpty ? widget.track.thumbnail : null,
+        title: targetTitle,
+        artist: targetArtist,
+        album: targetAlbum,
+        imageUrl: targetArt,
         playlistId: playlistId,
         trackId: widget.track.youtubeId,
         onProgress: (status, pct) {
@@ -393,26 +558,46 @@ class _RemoteTrackTileState extends ConsumerState<_RemoteTrackTile> {
           _done = file != null;
           _status = file != null ? 'Baixado!' : 'Falhou';
         });
+
         if (file != null) {
-          // Registra a faixa no banco local para aparecer na playlist
+          // 3. Obtém a última posição livre no final da playlist
+          final nextPos = await AppDatabase.instance.getNextPlaylistPosition(playlistId);
+
+          // 4. Registra a track com os metadados enriquecidos no banco
           final newTrack = Track(
             id: widget.track.youtubeId,
-            spotifyUri: '',
-            title: widget.track.title,
-            artist: widget.track.artist,
-            album: '',
-            albumArtUrl: widget.track.thumbnail.isNotEmpty
-                ? widget.track.thumbnail
-                : null,
-            durationMs: widget.track.durationMs,
+            spotifyUri: 'spotify:track:${widget.track.youtubeId}',
+            title: targetTitle,
+            artist: targetArtist,
+            album: targetAlbum,
+            albumArtUrl: targetArt,
+            durationMs: targetDuration,
             playlistId: playlistId,
+            playlistPosition: nextPos,
+            releaseYear: targetYear,
             localFilename: file.path.split('/').last,
             downloadStatus: 'success',
             available: true,
             isCached: true,
           );
           await AppDatabase.instance.upsertTracks([newTrack]);
-          // Atualiza contadores e lista da playlist
+
+          // 5. Incrementa a contagem de total_tracks na playlist correspondente
+          try {
+            final playlists = await AppDatabase.instance.getPlaylists();
+            final currentPlaylist = playlists.firstWhere((pl) => pl.id == playlistId);
+            await AppDatabase.instance.upsertPlaylist(currentPlaylist.copyWith(
+              totalTracks: currentPlaylist.totalTracks + 1,
+            ));
+          } catch (_) {}
+
+          // 6. Prefetch das letras do novo som
+          LyricsService.instance.prefetchAndSave(newTrack);
+
+          // 7. Salva as mudanças no manifest.json do diretório para portabilidade
+          ManifestService.instance.scheduleSave();
+
+          // Atualiza os contadores globais e telas de playlist
           ref.invalidate(playlistsProvider);
           ref.invalidate(playlistTracksProvider(playlistId));
         }

@@ -10,6 +10,7 @@ class Playlist {
   final int    failed;
   final String path;
   final String snapshotId;
+  final bool syncDisabled;
 
   const Playlist({
     required this.id,
@@ -22,6 +23,7 @@ class Playlist {
     this.failed      = 0,
     this.path        = '',
     this.snapshotId  = '',
+    this.syncDisabled = false,
   });
 
   int get pending => totalTracks - downloaded - failed;
@@ -43,6 +45,7 @@ class Playlist {
       failed:      json['failed']       ?? 0,
       path:        json['path']         ?? '',
       snapshotId:  json['snapshot_id']  ?? '',
+      syncDisabled: json['sync_disabled'] == 1 || (json['sync_disabled'] as bool? ?? false),
     );
   }
 
@@ -57,6 +60,7 @@ class Playlist {
     'failed':       failed,
     'path':         path,
     'snapshot_id':  snapshotId,
+    'sync_disabled': syncDisabled ? 1 : 0,
   };
 
   Playlist copyWith({
@@ -70,6 +74,7 @@ class Playlist {
     int? failed,
     String? path,
     String? snapshotId,
+    bool? syncDisabled,
   }) {
     return Playlist(
       id:          id          ?? this.id,
@@ -82,6 +87,7 @@ class Playlist {
       failed:      failed      ?? this.failed,
       path:        path        ?? this.path,
       snapshotId:  snapshotId  ?? this.snapshotId,
+      syncDisabled: syncDisabled ?? this.syncDisabled,
     );
   }
 }

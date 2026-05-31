@@ -18,13 +18,16 @@ class ServerDownloader {
     String? youtubeUrl,
     required Function(String status, double percentage) onProgress,
   }) async {
+    // Lê formato e qualidade das preferências do usuário
+    final prefs = await SharedPreferences.getInstance();
+    final audioFormat = prefs.getString('download_audio_format') ?? 'm4a';
+    final audioQuality = prefs.getString('download_audio_quality') ?? 'high';
     onProgress("Solicitando ao servidor...", 0.1);
+    print('[ServerDownloader] Iniciando download: $artist - $title [$audioFormat/$audioQuality]');
 
     const githubRepo = 'PietroTy/laplayer';
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-
       // ── 1. Método principal: GitHub auto-discovery ──────────────────────
       onProgress("Localizando servidor via GitHub...", 0.05);
       try {
@@ -64,42 +67,67 @@ class ServerDownloader {
       final dio = Dio();
       
       final tempDir = await getTemporaryDirectory();
-      final tempFilePath = p.join(tempDir.path, "temp_${DateTime.now().millisecondsSinceEpoch}.m4a");
-      
+      // Extensão temporária sem ext ainda — será determinada depois
+      final tempBase = p.join(tempDir.path, "temp_${DateTime.now().millisecondsSinceEpoch}");
+      final tempFilePath = '$tempBase.tmp';
+
       double lastProgress = 0.1;
 
-      await dio.download(
-        serverUrl,
-        tempFilePath,
-        data: {
-          'title': title,
-          'artist': artist,
-          'album': album,
-          'imageUrl': imageUrl,
-          'duration_ms': durationMs ?? 0,
-          'skip_match': skipMatch ?? 0,
-          'youtube_url': youtubeUrl,
-        },
-        options: Options(
-          method: 'POST',
-          receiveTimeout: const Duration(minutes: 5), // Pode demorar pois o servidor vai processar
-        ),
-        onReceiveProgress: (received, total) {
-          if (total != -1) {
-            final progress = 0.1 + (0.8 * (received / total));
-            if (progress - lastProgress > 0.05) {
-              onProgress("Baixando do servidor (${(progress * 100).toInt()}%)...", progress);
-              lastProgress = progress;
+      // Envia formato e qualidade para o servidor
+      final requestData = <String, dynamic>{
+        'title': title,
+        'artist': artist,
+        'album': album,
+        'imageUrl': imageUrl,
+        'duration_ms': durationMs ?? 0,
+        'skip_match': skipMatch ?? 0,
+        'youtube_url': youtubeUrl,
+        'audio_format': audioFormat,
+        'audio_quality': audioQuality,
+      };
+
+      Response response;
+      try {
+        response = await dio.download(
+          serverUrl,
+          tempFilePath,
+          data: requestData,
+          options: Options(
+            method: 'POST',
+            receiveTimeout: const Duration(minutes: 8),
+          ),
+          onReceiveProgress: (received, total) {
+            if (total != -1) {
+              final progress = 0.1 + (0.8 * (received / total));
+              if (progress - lastProgress > 0.05) {
+                onProgress("Baixando do servidor (${(progress * 100).toInt()}%)...", progress);
+                lastProgress = progress;
+              }
             }
-          }
-        },
-      );
+          },
+        );
+      } catch (e) {
+        // Tenta extrair mensagem de erro do servidor (ex: sem espaço em disco)
+        if (e.toString().contains('507') || e.toString().contains('Sem espaço')) {
+          throw Exception('Servidor sem espaço em disco. Libere espaço no servidor e tente novamente.');
+        }
+        rethrow;
+      }
 
       onProgress("Finalizando arquivo...", 0.9);
 
-      final downloadedFile = File(tempFilePath);
-      if (!downloadedFile.existsSync()) {
-        throw Exception("Arquivo não encontrado após download.");
+      final tempFile = File(tempFilePath);
+      if (!tempFile.existsSync() || tempFile.lengthSync() < 4096) {
+        throw Exception('Arquivo baixado está vazio ou corrompido (${tempFile.existsSync() ? tempFile.lengthSync() : 0} bytes).');
+      }
+
+      // Determina a extensão final a partir do Content-Disposition ou pelo formato pedido
+      String finalExt = audioFormat;
+      final contentDisposition = response.headers.value('content-disposition') ?? '';
+      final cdMatch = RegExp(r'\.([a-z0-9]+)["\s]?\s*\\?$', caseSensitive: false)
+          .firstMatch(contentDisposition);
+      if (cdMatch != null) {
+        finalExt = cdMatch.group(1)!.toLowerCase();
       }
 
       final musicDirRoot = await AppConstants.getMusicDirectory();
@@ -110,11 +138,14 @@ class ServerDownloader {
 
       final finalPath = p.join(
         musicDir.path,
-        "${_sanitizeFileName(artist)} - ${_sanitizeFileName(title)}.m4a",
+        "${_sanitizeFileName(artist)} - ${_sanitizeFileName(title)}.$finalExt",
       );
 
-      final finalFile = await downloadedFile.copy(finalPath);
-      await downloadedFile.delete();
+      final finalFile = await tempFile.copy(finalPath);
+      await tempFile.delete();
+
+      final fileSizeMb = finalFile.lengthSync() / (1024 * 1024);
+      print('[ServerDownloader] Arquivo salvo: $finalPath (${fileSizeMb.toStringAsFixed(1)} MB)');
 
       onProgress("Concluído!", 1.0);
       return finalFile;

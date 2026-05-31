@@ -55,12 +55,13 @@ class LibraryNotifier extends StateNotifier<AsyncValue<void>> {
     }
   }
 
-  /// Atualiza nome, descrição e URL da imagem da playlist
+  /// Atualiza nome, descrição, URL da imagem e toggle de sincronização da playlist
   Future<void> updatePlaylistDetails({
     required String playlistId,
     required String name,
     required String description,
     required String imageUrl,
+    bool? syncDisabled,
   }) async {
     state = const AsyncValue.loading();
     try {
@@ -70,6 +71,7 @@ class LibraryNotifier extends StateNotifier<AsyncValue<void>> {
         name: name,
         description: description,
         imageUrl: imageUrl,
+        syncDisabled: syncDisabled,
       );
       await AppDatabase.instance.upsertPlaylist(updated);
       ref.invalidate(playlistsProvider);

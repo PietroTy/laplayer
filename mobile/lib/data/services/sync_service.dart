@@ -12,6 +12,7 @@ import '../../providers/library_provider.dart';
 import 'server_downloader.dart';
 import 'lyrics_service.dart';
 import 'download_foreground_service.dart';
+import 'manifest_service.dart';
 
 /// Estado detalhado da sincronização
 class SyncState {
@@ -53,34 +54,138 @@ class SyncService extends StateNotifier<SyncState> {
     state = SyncState.idle();
   }
 
-  // Retorna o caminho absoluto do arquivo se ele existir localmente
+  // Extensões de áudio suportadas (em ordem de preferência)
+  static const _audioExtensions = ['m4a', 'opus', 'mp3', 'flac', 'webm', 'ogg'];
+
+  // Verifica se um arquivo existe e tem tamanho mínimo válido (evita arquivos corrompidos)
+  static Future<bool> _isValidAudioFile(String path) async {
+    final file = File(path);
+    if (!await file.exists()) return false;
+    return file.lengthSync() > 1024; // mínimo de 1 KB
+  }
+
+  // Mostra um aviso visível na tela de que o arquivo está corrompido
+  void _showCorruptionWarning(Track track) {
+    state = SyncState.error('Música corrompida removida: "${track.artist} - ${track.title}". Baixe-a novamente.');
+  }
+
+  // Deleta arquivos órfãos (letras, etc.) e reseta o status no banco de dados local
+  Future<void> checkAndCleanOrphanedTrack(Track track) async {
+    try {
+      final musicDirRoot = await AppConstants.getMusicDirectory();
+      final musicDir = p.join(musicDirRoot, track.playlistId);
+      final sanitize = (String s) => s.replaceAll(RegExp(r'[<>:"/\\|?*]'), '');
+      final baseName = '${sanitize(track.artist)} - ${sanitize(track.title)}';
+
+      // 1. Apaga arquivo de letras (.lrc)
+      final lrcFile = File(p.join(musicDir, '$baseName.lrc'));
+      if (await lrcFile.exists()) {
+        try {
+          await lrcFile.delete();
+        } catch (_) {}
+      }
+
+      // 2. Apaga qualquer arquivo físico parcial ou corrompido restante
+      if (track.localFilename != null && track.localFilename!.isNotEmpty) {
+        final f = File(p.join(musicDir, track.localFilename!));
+        if (await f.exists()) {
+          try {
+            await f.delete();
+          } catch (_) {}
+        }
+      }
+      for (final ext in _audioExtensions) {
+        final candidate = File(p.join(musicDir, '$baseName.$ext'));
+        if (await candidate.exists()) {
+          try {
+            await candidate.delete();
+          } catch (_) {}
+        }
+      }
+
+      // 3. Atualiza banco para refletir não instalado
+      final updated = track.copyWith(
+        isCached: false,
+        available: false,
+        downloadStatus: 'pending',
+      );
+      await AppDatabase.instance.upsertTracks([updated]);
+      
+      ref.invalidate(playlistsProvider);
+      ref.invalidate(playlistTracksProvider(track.playlistId));
+    } catch (_) {}
+  }
+
+  // Retorna o caminho absoluto do arquivo se ele existir localmente.
+  // Detecta se foi removido manualmente ou se está corrompido (tamanho < 1KB),
+  // limpando arquivos órfãos e revalidando o status no banco de dados.
   Future<String?> localPathForTrack(Track track) async {
     final musicDirRoot = await AppConstants.getMusicDirectory();
     final musicDir = p.join(musicDirRoot, track.playlistId);
 
     // 1. Caminho exato pelo localFilename (do servidor Python)
     if (track.localFilename != null && track.localFilename!.isNotEmpty) {
-      final file = File(p.join(musicDir, track.localFilename));
-      if (await file.exists()) return file.path;
+      final file = File(p.join(musicDir, track.localFilename!));
+      final exists = await file.exists();
+      if (exists) {
+        if (await _isValidAudioFile(file.path)) {
+          return file.path;
+        } else {
+          // Arquivo corrompido! Deleta e limpa
+          print('ARQUIVO CORROMPIDO DETECTADO: ${file.path}');
+          _showCorruptionWarning(track);
+          await checkAndCleanOrphanedTrack(track);
+          return null;
+        }
+      }
     }
 
-    // 2. Fallback: padrão do NativeDownloader ("Artist - Title.m4a")
+    // 2. Fallback: padrão do NativeDownloader com qualquer extensão suportada
     final sanitize = (String s) => s.replaceAll(RegExp(r'[<>:"/\\|?*]'), '');
-    final nativeName = '${sanitize(track.artist)} - ${sanitize(track.title)}.m4a';
-    final nativeFile = File(p.join(musicDir, nativeName));
-    if (await nativeFile.exists()) return nativeFile.path;
+    final baseName = '${sanitize(track.artist)} - ${sanitize(track.title)}';
+    for (final ext in _audioExtensions) {
+      final candidate = File(p.join(musicDir, '$baseName.$ext'));
+      final exists = await candidate.exists();
+      if (exists) {
+        if (await _isValidAudioFile(candidate.path)) {
+          return candidate.path;
+        } else {
+          // Arquivo corrompido! Deleta e limpa
+          print('ARQUIVO CORROMPIDO DETECTADO: ${candidate.path}');
+          _showCorruptionWarning(track);
+          await checkAndCleanOrphanedTrack(track);
+          return null;
+        }
+      }
+    }
 
-    // 3. Último recurso: varre a pasta procurando qualquer .m4a com o título
+    // 3. Último recurso: varre a pasta procurando qualquer áudio com o título
     final dir = Directory(musicDir);
     if (await dir.exists()) {
       final titleLower = track.title.toLowerCase();
       await for (final entity in dir.list()) {
-        if (entity is File && entity.path.endsWith('.m4a')) {
-          if (p.basename(entity.path).toLowerCase().contains(titleLower)) {
-            return entity.path;
+        if (entity is File) {
+          final ext = p.extension(entity.path).toLowerCase().replaceFirst('.', '');
+          if (_audioExtensions.contains(ext) &&
+              p.basename(entity.path).toLowerCase().contains(titleLower)) {
+            if (await _isValidAudioFile(entity.path)) {
+              return entity.path;
+            } else {
+              // Arquivo corrompido! Deleta e limpa
+              print('ARQUIVO CORROMPIDO DETECTADO: ${entity.path}');
+              _showCorruptionWarning(track);
+              await checkAndCleanOrphanedTrack(track);
+              return null;
+            }
           }
         }
       }
+    }
+
+    // Se o banco dizia que estava baixado, mas não achamos nenhum arquivo, então foi removido manualmente!
+    if (track.isCached || track.available || track.downloadStatus == 'success') {
+      print('ARQUIVO REMOVIDO MANUALMENTE DETECTADO para a música: ${track.title}');
+      await checkAndCleanOrphanedTrack(track);
     }
 
     return null;
@@ -88,8 +193,13 @@ class SyncService extends StateNotifier<SyncState> {
 
   // Retorna um mapa de ID da Track para o caminho absoluto do arquivo se ele existir localmente
   // Executa uma única listagem de diretório física em O(N) para máxima eficiência
-  Future<Map<String, String>> findLocalPathsBulk(String playlistId, List<Track> tracks) async {
-    final musicDirRoot = await AppConstants.getMusicDirectory();
+  // [overrideMusicDir] permite usar um diretório alternativo (ex: para recuperação de backup)
+  Future<Map<String, String>> findLocalPathsBulk(
+    String playlistId,
+    List<Track> tracks, {
+    String? overrideMusicDir,
+  }) async {
+    final musicDirRoot = overrideMusicDir ?? await AppConstants.getMusicDirectory();
     final musicDir = p.join(musicDirRoot, playlistId);
     final dir = Directory(musicDir);
 
@@ -98,8 +208,12 @@ class SyncService extends StateNotifier<SyncState> {
       try {
         final entities = await dir.list().toList();
         for (final entity in entities) {
-          if (entity is File && entity.path.toLowerCase().endsWith('.m4a')) {
-            filenameToPath[p.basename(entity.path).toLowerCase()] = entity.path;
+          if (entity is File) {
+            final ext = p.extension(entity.path).toLowerCase().replaceFirst('.', '');
+            // Aceita qualquer extensão de áudio suportada (não só .m4a)
+            if (_audioExtensions.contains(ext) && entity.lengthSync() > 1024) {
+              filenameToPath[p.basename(entity.path).toLowerCase()] = entity.path;
+            }
           }
         }
       } catch (e) {
@@ -121,16 +235,19 @@ class SyncService extends StateNotifier<SyncState> {
         }
       }
 
-      // 2. Fallback: padrão do NativeDownloader ("Artist - Title.m4a")
+      // 2. Fallback: qualquer extensão suportada com o padrão "Artist - Title"
       if (matchedPath == null) {
-        final nativeName = '${sanitize(track.artist)} - ${sanitize(track.title)}.m4a';
-        final key = nativeName.toLowerCase();
-        if (filenameToPath.containsKey(key)) {
-          matchedPath = filenameToPath[key];
+        final baseName = '${sanitize(track.artist)} - ${sanitize(track.title)}';
+        for (final ext in _audioExtensions) {
+          final key = '$baseName.$ext'.toLowerCase();
+          if (filenameToPath.containsKey(key)) {
+            matchedPath = filenameToPath[key];
+            break;
+          }
         }
       }
 
-      // 3. Último recurso: qualquer .m4a com o título no nome
+      // 3. Último recurso: qualquer arquivo de áudio com o título no nome
       if (matchedPath == null) {
         final titleLower = track.title.toLowerCase();
         for (final entry in filenameToPath.entries) {
@@ -177,6 +294,11 @@ class SyncService extends StateNotifier<SyncState> {
       final localPlaylist = currentPlaylists.cast<Playlist?>().firstWhere(
         (pl) => pl?.id == playlistId, orElse: () => null
       );
+      
+      if (localPlaylist != null && localPlaylist.syncDisabled) {
+        state = SyncState.success('Sincronização desabilitada para esta playlist.');
+        return;
+      }
       
       String? remoteSnapshot;
       if (localPlaylist != null) {
@@ -260,6 +382,7 @@ class SyncService extends StateNotifier<SyncState> {
       }
 
       state = SyncState.success('Dados sincronizados com sucesso!');
+      ManifestService.instance.scheduleSave(); // Auto-salva manifesto após sync
     } catch (e) {
       state = SyncState.error('$e');
     }
@@ -290,69 +413,97 @@ class SyncService extends StateNotifier<SyncState> {
 
       int downloadedCount = 0;
       int failedCount = 0;
+      final totalPending = pendingTracks.length;
 
-      for (final track in pendingTracks) {
-        if (_cancelRequested) break;
+      final prefs = await SharedPreferences.getInstance();
+      final concurrency = prefs.getInt('download_concurrency') ?? 3;
+      print('[SyncService] Iniciando download paralelo com concorrência = $concurrency');
 
-        // Atualiza notificação com a música atual
-        _fgs.updateNotification(
-          'Baixando ${downloadedCount + 1}/${pendingTracks.length}',
-          track.title,
-        );
+      int nextIndex = 0;
 
-        // Marca a track como 'downloading'
-        await AppDatabase.instance.upsertTracks([track.copyWith(
-          downloadStatus: 'downloading',
-        )]);
-        ref.read(downloadProgressProvider(track.id).notifier).state = 0.0;
-        ref.invalidate(playlistTracksProvider(playlistId));
+      Future<void> runWorker() async {
+        while (nextIndex < totalPending) {
+          if (_cancelRequested) break;
+          
+          final currentIndex = nextIndex++;
+          if (currentIndex >= totalPending) break;
 
-        final currentProgress = downloadedCount / pendingTracks.length;
-        state = SyncState.loading(
-          'Baixando: ${track.title} ($downloadedCount/${pendingTracks.length})',
-          progress: currentProgress,
-        );
+          final track = pendingTracks[currentIndex];
 
-        final file = await _serverDownloader.downloadTrack(
-          title: track.title,
-          artist: track.artist,
-          album: track.album,
-          imageUrl: track.albumArtUrl,
-          playlistId: playlistId,
-          trackId: track.id,
-          onProgress: (msg, trackProgress) {
-            ref.read(downloadProgressProvider(track.id).notifier).state = trackProgress;
-            final overallProgress = (downloadedCount + trackProgress) / pendingTracks.length;
-            state = SyncState.loading(
-              '$msg (${track.title})',
-              progress: overallProgress,
-            );
-          },
-        );
-
-        ref.read(downloadProgressProvider(track.id).notifier).state = null;
-
-        if (file != null) {
-          downloadedCount++;
+          // Marca a track como 'downloading'
           await AppDatabase.instance.upsertTracks([track.copyWith(
-            available: true,
-            isCached: true,
-            downloadStatus: 'success',
-            localFilename: p.basename(file.path),
+            downloadStatus: 'downloading',
           )]);
+          ref.read(downloadProgressProvider(track.id).notifier).state = 0.0;
           ref.invalidate(playlistTracksProvider(playlistId));
-          ref.invalidate(playlistsProvider);
 
-          LyricsService.instance.prefetchAndSave(track);
-          await Future.delayed(const Duration(seconds: 2));
-        } else {
-          failedCount++;
-          await AppDatabase.instance.upsertTracks([track.copyWith(
-            downloadStatus: 'failed',
-          )]);
-          ref.invalidate(playlistTracksProvider(playlistId));
+          // Atualiza notificação
+          _fgs.updateNotification(
+            'Baixando músicas ($concurrency em paralelo)...',
+            '$downloadedCount/$totalPending concluídas ($failedCount falhas)',
+          );
+
+          // Atualiza estado do provider
+          state = SyncState.loading(
+            'Baixando: $downloadedCount/$totalPending concluídas (${track.title})',
+            progress: downloadedCount / totalPending,
+          );
+
+          final file = await _serverDownloader.downloadTrack(
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            imageUrl: track.albumArtUrl,
+            playlistId: playlistId,
+            trackId: track.id,
+            onProgress: (msg, trackProgress) {
+              ref.read(downloadProgressProvider(track.id).notifier).state = trackProgress;
+              state = SyncState.loading(
+                'Baixando: $downloadedCount/$totalPending concluídas ($failedCount falhas)',
+                progress: (downloadedCount + (trackProgress / concurrency)) / totalPending,
+              );
+            },
+          );
+
+          ref.read(downloadProgressProvider(track.id).notifier).state = null;
+
+          if (file != null) {
+            downloadedCount++;
+            await AppDatabase.instance.upsertTracks([track.copyWith(
+              available: true,
+              isCached: true,
+              downloadStatus: 'success',
+              localFilename: p.basename(file.path),
+            )]);
+            ref.invalidate(playlistTracksProvider(playlistId));
+            ref.invalidate(playlistsProvider);
+
+            LyricsService.instance.prefetchAndSave(track);
+            ManifestService.instance.scheduleSave();
+            
+            // Pequeno respiro antes de puxar a próxima música neste worker
+            await Future.delayed(const Duration(milliseconds: 800));
+          } else {
+            failedCount++;
+            await AppDatabase.instance.upsertTracks([track.copyWith(
+              downloadStatus: 'failed',
+            )]);
+            ref.invalidate(playlistTracksProvider(playlistId));
+          }
+
+          _fgs.updateNotification(
+            'Baixando músicas ($concurrency em paralelo)...',
+            '$downloadedCount/$totalPending concluídas ($failedCount falhas)',
+          );
+          state = SyncState.loading(
+            'Baixando: $downloadedCount/$totalPending concluídas ($failedCount falhas)',
+            progress: downloadedCount / totalPending,
+          );
         }
       }
+
+      final workers = List.generate(concurrency, (_) => runWorker());
+      await Future.wait(workers);
 
       // 3. Para o foreground service ao concluir
       await _fgs.stop();

@@ -1,6 +1,8 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../models/album_group.dart';
+import '../models/artist_group.dart';
 import '../models/track.dart';
 import '../models/playlist.dart';
 
@@ -53,7 +55,8 @@ class AppDatabase {
         failed        INTEGER DEFAULT 0,
         path          TEXT,
         snapshot_id   TEXT,
-        synced_at     TEXT
+        synced_at     TEXT,
+        sync_disabled INTEGER DEFAULT 0
       )
     ''');
 
@@ -111,12 +114,17 @@ class AppDatabase {
       'snapshot_id',
       'description',
       'image_url',
-      'spotify_url'
+      'spotify_url',
+      'sync_disabled'
     ];
     
     for (var col in columns) {
       try {
-        await db.execute('ALTER TABLE playlists ADD COLUMN $col TEXT');
+        if (col == 'sync_disabled') {
+          await db.execute('ALTER TABLE playlists ADD COLUMN sync_disabled INTEGER DEFAULT 0');
+        } else {
+          await db.execute('ALTER TABLE playlists ADD COLUMN $col TEXT');
+        }
       } catch (_) {
         // Se a coluna já existe, o SQLite dá erro e a gente ignora com segurança
       }
@@ -141,6 +149,7 @@ class AppDatabase {
         'path':         p.path,
         'snapshot_id':  p.snapshotId,
         'synced_at':    DateTime.now().toIso8601String(),
+        'sync_disabled': p.syncDisabled ? 1 : 0,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -174,6 +183,7 @@ class AppDatabase {
     failed:      row['failed']       ?? 0,
     path:        row['path']         ?? '',
     snapshotId:  row['snapshot_id']  ?? '',
+    syncDisabled: row['sync_disabled'] == 1,
   );
 
   Future<void> deletePlaylist(String playlistId) async {
@@ -183,6 +193,34 @@ class AppDatabase {
       await txn.delete('tracks', where: 'playlist_id = ?', whereArgs: [playlistId]);
       // 2. Remove a própria playlist
       await txn.delete('playlists', where: 'id = ?', whereArgs: [playlistId]);
+    });
+  }
+
+  Future<int> getNextPlaylistPosition(String playlistId) async {
+    final database = await db;
+    final row = await database.rawQuery(
+      'SELECT MAX(playlist_position) as max_pos FROM tracks WHERE playlist_id = ?',
+      [playlistId],
+    );
+    if (row.isNotEmpty && row.first['max_pos'] != null) {
+      return (row.first['max_pos'] as int) + 1;
+    }
+    return 0;
+  }
+
+  Future<void> updateTrackPositions(List<String> trackIds) async {
+    final database = await db;
+    await database.transaction((txn) async {
+      final batch = txn.batch();
+      for (int i = 0; i < trackIds.length; i++) {
+        batch.update(
+          'tracks',
+          {'playlist_position': i},
+          where: 'id = ?',
+          whereArgs: [trackIds[i]],
+        );
+      }
+      await batch.commit(noResult: true);
     });
   }
 
@@ -302,15 +340,131 @@ class AppDatabase {
     return rows.map(_rowToTrack).toList();
   }
 
-  Future<List<Track>> searchTracks(String query) async {
+  Future<List<Track>> searchTracks(String query, {bool? cachedOnly}) async {
+    final database = await db;
+    final q = '%$query%';
+    final where = StringBuffer('(title LIKE ? OR artist LIKE ? OR album LIKE ?)');
+    final args = <Object>[q, q, q];
+    if (cachedOnly == true) {
+      where.write(' AND is_cached = 1');
+    } else if (cachedOnly == false) {
+      where.write(' AND is_cached = 0');
+    }
+    final rows = await database.query(
+      'tracks',
+      where: where.toString(),
+      whereArgs: args,
+      orderBy: 'title ASC',
+      limit: 50,
+    );
+    return rows.map(_rowToTrack).toList();
+  }
+
+  Future<List<Track>> searchTracksByGenre(String query) async {
     final database = await db;
     final q = '%$query%';
     final rows = await database.query(
       'tracks',
-      where: 'title LIKE ? OR artist LIKE ? OR album LIKE ?',
-      whereArgs: [q, q, q],
+      where: 'genres LIKE ?',
+      whereArgs: [q],
       orderBy: 'title ASC',
-      limit: 50,
+      limit: 100,
+    );
+    return rows.map(_rowToTrack).toList();
+  }
+
+  Future<List<AlbumGroup>> searchAlbums(String query, {String? playlistId}) async {
+    final database = await db;
+    final q = '%$query%';
+    final whereClause = playlistId != null
+        ? 'AND t.playlist_id = ?'
+        : '';
+    final args = playlistId != null
+        ? [q, q, q, playlistId]
+        : [q, q, q];
+    final rows = await database.rawQuery('''
+      SELECT
+        t.album,
+        t.album_artist,
+        t.album_art_url,
+        t.release_year,
+        COUNT(*) as total_tracks,
+        SUM(t.is_cached) as downloaded_tracks,
+        GROUP_CONCAT(DISTINCT t.playlist_id) as playlist_ids
+      FROM tracks t
+      WHERE (t.album LIKE ? OR t.artist LIKE ? OR t.title LIKE ?)
+        AND t.album != ''
+        $whereClause
+      GROUP BY t.album, t.album_artist
+      ORDER BY t.album ASC
+      LIMIT 50
+    ''', args);
+    return rows.map((r) => AlbumGroup(
+      albumName: r['album'] as String? ?? '',
+      albumArtist: r['album_artist'] as String? ?? '',
+      albumArtUrl: r['album_art_url'] as String?,
+      releaseYear: r['release_year'] as String? ?? '',
+      totalTracks: r['total_tracks'] as int? ?? 0,
+      downloadedTracks: r['downloaded_tracks'] as int? ?? 0,
+      playlistIds: (r['playlist_ids'] as String? ?? '').split(',').where((s) => s.isNotEmpty).toList(),
+    )).toList();
+  }
+
+  Future<List<Track>> getTracksForAlbum(String albumName, {String? playlistId}) async {
+    final database = await db;
+    final where = playlistId != null
+        ? 'album = ? AND playlist_id = ?'
+        : 'album = ?';
+    final args = playlistId != null ? [albumName, playlistId] : [albumName];
+    final rows = await database.query(
+      'tracks',
+      where: where,
+      whereArgs: args,
+      orderBy: 'track_number ASC',
+    );
+    return rows.map(_rowToTrack).toList();
+  }
+
+  Future<List<ArtistGroup>> searchArtists(String query, {String? playlistId}) async {
+    final database = await db;
+    final q = '%$query%';
+    final whereClause = playlistId != null ? 'AND t.playlist_id = ?' : '';
+    final args = playlistId != null ? [q, q, playlistId] : [q, q];
+    final rows = await database.rawQuery('''
+      SELECT
+        t.primary_artist as artist_name,
+        t.album_art_url,
+        COUNT(*) as total_tracks,
+        SUM(t.is_cached) as downloaded_tracks,
+        COUNT(DISTINCT t.album) as album_count
+      FROM tracks t
+      WHERE (t.primary_artist LIKE ? OR t.artist LIKE ?)
+        AND t.primary_artist != ''
+        $whereClause
+      GROUP BY t.primary_artist
+      ORDER BY t.primary_artist ASC
+      LIMIT 50
+    ''', args);
+    return rows.map((r) => ArtistGroup(
+      name: r['artist_name'] as String? ?? '',
+      coverArtUrl: r['album_art_url'] as String?,
+      totalTracks: r['total_tracks'] as int? ?? 0,
+      downloadedTracks: r['downloaded_tracks'] as int? ?? 0,
+      albumCount: r['album_count'] as int? ?? 0,
+    )).toList();
+  }
+
+  Future<List<Track>> getTracksForArtist(String artistName, {String? playlistId}) async {
+    final database = await db;
+    final where = playlistId != null
+        ? 'primary_artist = ? AND playlist_id = ?'
+        : 'primary_artist = ?';
+    final args = playlistId != null ? [artistName, playlistId] : [artistName];
+    final rows = await database.query(
+      'tracks',
+      where: where,
+      whereArgs: args,
+      orderBy: 'album ASC, track_number ASC',
     );
     return rows.map(_rowToTrack).toList();
   }

@@ -11,6 +11,8 @@ import 'package:file_picker/file_picker.dart';
 import '../core/constants.dart';
 import '../core/theme.dart';
 import '../data/services/sync_service.dart';
+import '../data/services/manifest_service.dart';
+import '../providers/library_provider.dart';
 import 'widgets/app_logo.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -24,6 +26,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _spotifyIdCtrl = TextEditingController();
   final _spotifySecretCtrl = TextEditingController();
   final _downloadDirCtrl = TextEditingController();
+
+  // ── Preferências de Download ────────────────────────────────────
+  String _audioFormat = 'm4a';
+  String _audioQuality = 'high';
+  int _concurrency = 3;
+
+  // Formatos disponíveis: id, label, descrição, ícone, tamanho estimado por música (~3 min)
+  static const _formats = [
+    {'id': 'opus',  'label': 'Opus',  'desc': 'Menor tamanho, ótima qualidade', 'icon': Icons.compress,    'size': '~2–3 MB'},
+    {'id': 'm4a',   'label': 'M4A',   'desc': 'Padrão, compatível com tudo',   'icon': Icons.music_note,   'size': '~4–5 MB'},
+    {'id': 'mp3',   'label': 'MP3',   'desc': 'Universal, amplo suporte',       'icon': Icons.audio_file,   'size': '~4–6 MB'},
+    {'id': 'flac',  'label': 'FLAC',  'desc': 'Lossless, máxima fidelidade',   'icon': Icons.high_quality, 'size': '~25–40 MB'},
+  ];
+
+  // Qualidades disponíveis: id, label, descrição
+  static const _qualities = [
+    {'id': 'low',    'label': 'Econômico', 'desc': '64 kbps',  'icon': Icons.battery_saver},
+    {'id': 'medium', 'label': 'Médio',     'desc': '128 kbps', 'icon': Icons.graphic_eq},
+    {'id': 'high',   'label': 'Alto',       'desc': '192 kbps', 'icon': Icons.hd},
+    {'id': 'best',   'label': 'Máximo',    'desc': 'Original', 'icon': Icons.star},
+  ];
  
   @override
   void initState() {
@@ -35,14 +58,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     _spotifyIdCtrl.text = prefs.getString('spotify_client_id') ?? '';
     _spotifySecretCtrl.text = prefs.getString('spotify_client_secret') ?? '';
-    
+
     final customPath = prefs.getString('custom_music_directory') ?? '';
     if (customPath.isNotEmpty) {
       _downloadDirCtrl.text = customPath;
     } else {
       _downloadDirCtrl.text = await AppConstants.getDefaultMusicDirectory();
     }
+
+    _audioFormat = prefs.getString('download_audio_format') ?? 'm4a';
+    _audioQuality = prefs.getString('download_audio_quality') ?? 'high';
+    _concurrency = prefs.getInt('download_concurrency') ?? 3;
     setState(() {});
+  }
+
+  Future<void> _saveDownloadQuality() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('download_audio_format', _audioFormat);
+    await prefs.setString('download_audio_quality', _audioQuality);
+    await prefs.setInt('download_concurrency', _concurrency);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Preferências de download salvas!'),
+          backgroundColor: AppColors.accent,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   Future<void> _saveDownloadDir() async {
@@ -404,6 +447,258 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           const SizedBox(height: 20),
 
+          // ── Qualidade de Download ────────────────────────────────────
+          _Section(
+            title: 'Qualidade de Download',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Escolha o formato e a qualidade das músicas baixadas.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                ),
+                const SizedBox(height: 16),
+
+                // ─ Formato ──────────────────────────────────────────────
+                const Text(
+                  'FORMATO',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1),
+                ),
+                const SizedBox(height: 10),
+                ...(_formats as List<Map<String, Object>>).map((fmt) {
+                  final isSelected = _audioFormat == fmt['id'] as String;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => setState(() => _audioFormat = fmt['id'] as String),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSelected ? AppColors.accent : AppColors.border,
+                            width: isSelected ? 2 : 1,
+                          ),
+                          color: isSelected ? AppColors.accent.withOpacity(0.08) : Colors.transparent,
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              fmt['icon'] as IconData,
+                              color: isSelected ? AppColors.accent : AppColors.textMuted,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Text(
+                                        fmt['label'] as String,
+                                        style: TextStyle(
+                                          color: isSelected ? AppColors.accent : AppColors.textPrimary,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(20),
+                                          color: isSelected ? AppColors.accent.withOpacity(0.15) : AppColors.surface,
+                                        ),
+                                        child: Text(
+                                          fmt['size'] as String,
+                                          style: TextStyle(
+                                            color: isSelected ? AppColors.accent : AppColors.textMuted,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    fmt['desc'] as String,
+                                    style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (isSelected)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: Icon(Icons.check_circle_rounded, color: AppColors.accent, size: 20),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+
+                const SizedBox(height: 16),
+
+                // ─ Qualidade (bitrate) ───────────────────────────────────
+                const Text(
+                  'QUALIDADE (BITRATE)',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1),
+                ),
+                const SizedBox(height: 10),
+                // Nota: qualidade não se aplica ao FLAC (sempre lossless)
+                if (_audioFormat == 'flac')
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      color: AppColors.accent.withOpacity(0.06),
+                      border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline_rounded, color: AppColors.accent, size: 16),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'FLAC é lossless — qualidade sempre máxima.',
+                            style: TextStyle(color: AppColors.textSecond, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Row(
+                    children: (_qualities as List<Map<String, Object>>).map((q) {
+                      final isSelected = _audioQuality == q['id'] as String;
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => setState(() => _audioQuality = q['id'] as String),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: isSelected ? AppColors.accent : AppColors.border,
+                                  width: isSelected ? 2 : 1,
+                                ),
+                                color: isSelected ? AppColors.accent.withOpacity(0.08) : Colors.transparent,
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    q['icon'] as IconData,
+                                    color: isSelected ? AppColors.accent : AppColors.textMuted,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    q['label'] as String,
+                                    style: TextStyle(
+                                      color: isSelected ? AppColors.accent : AppColors.textPrimary,
+                                      fontSize: 11,
+                                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.normal,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  Text(
+                                    q['desc'] as String,
+                                    style: const TextStyle(color: AppColors.textMuted, fontSize: 9),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+
+                const SizedBox(height: 20),
+
+                // ─ Downloads em Paralelo ────────────────────────────────
+                const Text(
+                  'DOWNLOADS EM PARALELO',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.1),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Quantidade de músicas baixadas simultaneamente.',
+                            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '$_concurrency downloads simultâneos',
+                            style: TextStyle(color: AppColors.accent, fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    // Seletor de Concorrência
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppColors.border),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.remove_rounded),
+                            color: _concurrency > 1 ? Colors.white : Colors.white24,
+                            onPressed: _concurrency > 1 ? () => setState(() => _concurrency--) : null,
+                          ),
+                          Text('$_concurrency', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          IconButton(
+                            icon: const Icon(Icons.add_rounded),
+                            color: _concurrency < 6 ? Colors.white : Colors.white24,
+                            onPressed: _concurrency < 6 ? () => setState(() => _concurrency++) : null,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.save_alt_rounded, size: 18),
+                    label: const Text('Salvar Preferências de Download'),
+                    onPressed: _saveDownloadQuality,
+                  ),
+                ),
+
+                // Aviso sobre músicas já baixadas
+                const SizedBox(height: 10),
+                const Text(
+                  '⚠️ Músicas já baixadas não serão refeitas automaticamente.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
           // ── Tema Visual ──────────────────────────────────────────────────
           _Section(
             title: 'Tema Visual',
@@ -465,6 +760,160 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
 
+
+          const SizedBox(height: 20),
+
+          // ── Backup & Recuperação ──────────────────────────────────────────
+          _Section(
+            title: 'Backup & Recuperação',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Portabilidade total: seus dados de playlist e arquivos de áudio são mantidos juntos. Salve um manifesto ou restaure tudo a partir de qualquer pasta que já possua músicas.',
+                  style: TextStyle(color: AppColors.textSecond, fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.surfaceHigh,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            side: const BorderSide(color: AppColors.border),
+                          ),
+                        ),
+                        onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          final file = await ManifestService.instance.saveNow();
+                          if (file != null) {
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Manifesto exportado com sucesso em: ${file.path}'),
+                                backgroundColor: AppColors.accent,
+                              ),
+                            );
+                          } else {
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('Falha ao exportar manifesto.'),
+                                backgroundColor: AppColors.error,
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.backup_rounded, size: 18),
+                        label: const Text('Exportar Backup', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.accent,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          try {
+                            String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+                            if (selectedDirectory == null) return;
+
+                            // Verifica se há manifest.json
+                            final preview = await ManifestService.instance.previewManifest(selectedDirectory);
+                            if (preview == null) {
+                              messenger.showSnackBar(
+                                const SnackBar(
+                                  content: Text('Nenhum manifest.json válido foi encontrado nesta pasta.'),
+                                  backgroundColor: AppColors.warning,
+                                ),
+                              );
+                              return;
+                            }
+
+                            // Mostra confirmação
+                            if (!mounted) return;
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                backgroundColor: AppColors.surface,
+                                title: const Text('Importar Backup?', style: TextStyle(color: Colors.white)),
+                                content: Text(
+                                  'Encontrado backup de ${preview.playlistCount} playlists e ${preview.trackCount} músicas.\nDeseja importar estes metadados e usar esta pasta?\n\nExportado em: ${preview.exportedAt}',
+                                  style: const TextStyle(color: AppColors.textSecond),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
+                                  ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text('Importar', style: TextStyle(color: Colors.black)),
+                                  ),
+                                ],
+                              ),
+                            );
+
+                            if (confirm == true) {
+                              final result = await ManifestService.instance.recoverFromDirectory(selectedDirectory);
+                              // Atualiza o controller da UI também para bater com o novo caminho
+                              _downloadDirCtrl.text = selectedDirectory;
+                              // Recarrega as playlists do riverpod
+                              ref.invalidate(playlistsProvider);
+                              
+                              if (mounted) {
+                                setState(() {});
+                                showDialog(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    backgroundColor: AppColors.surface,
+                                    title: Text('Sucesso!', style: TextStyle(color: AppColors.accent)),
+                                    content: Text(
+                                      'Importado com sucesso:\n'
+                                      '• ${result.playlistsImported} playlists\n'
+                                      '• ${result.tracksImported} músicas descritas\n'
+                                      '• ${result.tracksFound} músicas encontradas e vinculadas localmente!',
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                    actions: [
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
+                                        onPressed: () => Navigator.pop(ctx),
+                                        child: const Text('OK', style: TextStyle(color: Colors.black)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                            }
+                          } catch (e) {
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Erro ao importar backup: $e'),
+                                backgroundColor: AppColors.error,
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.restore_rounded, size: 18),
+                        label: const Text('Importar / Recuperar', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
 
           const SizedBox(height: 20),
 

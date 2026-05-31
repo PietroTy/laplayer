@@ -161,7 +161,7 @@ class TrackTile extends ConsumerWidget {
                     )
                   else
                     GestureDetector(
-                      onTap: () => ref.read(syncProvider.notifier).retryTrackDownload(track),
+                      onTap: () => _showRetrySheet(context, ref, track),
                       child: const Padding(
                         padding: EdgeInsets.only(left: 8, top: 4, bottom: 4),
                         child: Icon(Icons.refresh_rounded, size: 16, color: AppColors.textMuted),
@@ -291,7 +291,19 @@ class _PlayingIndicatorState extends State<_PlayingIndicator>
 
 // ── Menu de 3 pontinhos da track ───────────────────────────────────────────
 
-enum _TrackMenuAction { addToQueue, redownload, removeFromPlaylist }
+// Abre o sheet de retry/busca para uma track não baixada
+void _showRetrySheet(BuildContext context, WidgetRef ref, Track track) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: AppColors.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (ctx) => _RetryOrSearchSheet(track: track),
+  );
+}
+
+enum _TrackMenuAction { showInfo, addToQueue, redownload, manualSearch, removeFromPlaylist }
 
 class _TrackMenu extends ConsumerWidget {
   final Track track;
@@ -306,29 +318,46 @@ class _TrackMenu extends ConsumerWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       onSelected: (action) => _handleAction(context, ref, action),
       itemBuilder: (_) => [
-        const PopupMenuItem(
+        PopupMenuItem(
+          value: _TrackMenuAction.showInfo,
+          child: Row(children: [
+            Icon(Icons.info_outline_rounded, size: 18, color: AppColors.accent),
+            const SizedBox(width: 10),
+            const Text('Sobre a música', style: TextStyle(color: AppColors.textPrimary, fontSize: 14)),
+          ]),
+        ),
+        PopupMenuItem(
           value: _TrackMenuAction.addToQueue,
           child: Row(children: [
             Icon(Icons.queue_music_rounded, size: 18, color: AppColors.textSecond),
-            SizedBox(width: 10),
-            Text('Adicionar à fila', style: TextStyle(color: AppColors.textPrimary, fontSize: 14)),
+            const SizedBox(width: 10),
+            const Text('Adicionar à fila', style: TextStyle(color: AppColors.textPrimary, fontSize: 14)),
           ]),
         ),
         if (track.isCached)
-          const PopupMenuItem(
+          PopupMenuItem(
             value: _TrackMenuAction.redownload,
             child: Row(children: [
               Icon(Icons.swap_horiz_rounded, size: 18, color: Colors.orange),
-              SizedBox(width: 10),
-              Text('Baixar versão alternativa', style: TextStyle(color: Colors.orange, fontSize: 14)),
+              const SizedBox(width: 10),
+              const Text('Baixar versão alternativa', style: TextStyle(color: Colors.orange, fontSize: 14)),
+            ]),
+          )
+        else
+          PopupMenuItem(
+            value: _TrackMenuAction.manualSearch,
+            child: Row(children: [
+              Icon(Icons.youtube_searched_for_rounded, size: 18, color: AppColors.accent),
+              const SizedBox(width: 10),
+              Text('Pesquisar no YouTube', style: TextStyle(color: AppColors.accent, fontSize: 14)),
             ]),
           ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: _TrackMenuAction.removeFromPlaylist,
           child: Row(children: [
             Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
-            SizedBox(width: 10),
-            Text('Remover da playlist', style: TextStyle(color: Colors.redAccent, fontSize: 14)),
+            const SizedBox(width: 10),
+            const Text('Remover da playlist', style: TextStyle(color: Colors.redAccent, fontSize: 14)),
           ]),
         ),
       ],
@@ -337,6 +366,10 @@ class _TrackMenu extends ConsumerWidget {
 
   void _handleAction(BuildContext context, WidgetRef ref, _TrackMenuAction action) {
     switch (action) {
+      case _TrackMenuAction.showInfo:
+        showTrackInfoSheet(context, ref, track);
+        break;
+
       case _TrackMenuAction.addToQueue:
         ref.read(playerProvider.notifier).addToQueue(track);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -349,6 +382,10 @@ class _TrackMenu extends ConsumerWidget {
 
       case _TrackMenuAction.redownload:
         _showVisualRedownloadSheet(context, ref);
+        break;
+
+      case _TrackMenuAction.manualSearch:
+        _showRetrySheet(context, ref, track);
         break;
 
       case _TrackMenuAction.removeFromPlaylist:
@@ -428,6 +465,164 @@ class _TrackMenu extends ConsumerWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => _VisualRedownloadSheet(track: track),
+    );
+  }
+}
+
+// ── Sheet de Retry / Busca Manual (para tracks não baixadas) ───────────────
+
+class _RetryOrSearchSheet extends ConsumerWidget {
+  final Track track;
+  const _RetryOrSearchSheet({required this.track});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final durationStr = track.durationFormatted;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Drag handle
+          Center(
+            child: Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.textMuted.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Cabeçalho com info da música
+          Row(
+            children: [
+              _AlbumArt(url: track.albumArtUrl, isActive: false),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '${track.artist} • $durationStr',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+          const Divider(color: AppColors.border, height: 1),
+          const SizedBox(height: 16),
+
+          // Opção 1: Retry automático
+          _OptionButton(
+            icon: Icons.refresh_rounded,
+            color: AppColors.textSecond,
+            label: 'Tentar novamente',
+            subtitle: 'Repete a busca automática no YouTube',
+            onTap: () {
+              Navigator.pop(context);
+              ref.read(syncProvider.notifier).retryTrackDownload(track);
+            },
+          ),
+
+          const SizedBox(height: 10),
+
+          // Opção 2: Busca manual
+          _OptionButton(
+            icon: Icons.youtube_searched_for_rounded,
+            color: AppColors.accent,
+            label: 'Pesquisar manualmente',
+            subtitle: 'Escolha o vídeo correto no YouTube',
+            onTap: () {
+              Navigator.pop(context);
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: AppColors.surface,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                builder: (_) => _VisualRedownloadSheet(track: track),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OptionButton extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label;
+  final String subtitle;
+  final VoidCallback onTap;
+  const _OptionButton({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+          color: AppColors.surfaceHigh,
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                    style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: AppColors.textMuted, size: 20),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -737,4 +932,281 @@ class _VisualRedownloadSheetState extends ConsumerState<_VisualRedownloadSheet> 
       }
     });
   }
+}
+
+// ── Método de Exibição das Informações Completas da Música ─────────────────
+void showTrackInfoSheet(BuildContext context, WidgetRef ref, Track track) async {
+  final path = await ref.read(syncProvider.notifier).localPathForTrack(track);
+
+  if (!context.mounted) return;
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: AppColors.surface,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (ctx) {
+      final formattedDuration = () {
+        final d = Duration(milliseconds: track.durationMs);
+        final min = d.inMinutes;
+        final sec = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+        return '$min:$sec';
+      }();
+
+      return DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) {
+          return SingleChildScrollView(
+            controller: scrollController,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Barra de arraste superior
+                  Center(
+                    child: Container(
+                      width: 40, height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Header da música (Capa, Título, Artista, Álbum)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          width: 80, height: 80,
+                          color: AppColors.bg,
+                          child: track.albumArtUrl != null && track.albumArtUrl!.isNotEmpty
+                              ? Image.network(
+                                  track.albumArtUrl!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const Icon(Icons.music_note_rounded, color: AppColors.textMuted),
+                                )
+                              : const Icon(Icons.music_note_rounded, color: AppColors.textMuted),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              track.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              track.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: AppColors.textSecond,
+                                fontSize: 14,
+                              ),
+                            ),
+                            if (track.album.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                track.album,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 12,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  const Divider(color: Colors.white12, height: 1),
+                  const SizedBox(height: 16),
+
+                  // ── INFORMAÇÕES DO ARQUIVO (IO/FÍSICO) ─────────────────
+                  _buildSectionHeader('Arquivos e Armazenamento'),
+                  _buildInfoRow(
+                    icon: Icons.sd_storage_rounded,
+                    label: 'Status do arquivo',
+                    value: track.isCached ? 'Salvo localmente (Offline)' : 'Não instalado (Pendente)',
+                    valueColor: track.isCached ? AppColors.accent : Colors.redAccent,
+                  ),
+                  if (track.isCached) ...[
+                    _buildInfoRow(
+                      icon: Icons.file_present_rounded,
+                      label: 'Nome do arquivo',
+                      value: track.localFilename ?? 'Não disponível',
+                    ),
+                    _buildInfoRow(
+                      icon: Icons.folder_open_rounded,
+                      label: 'Diretório completo',
+                      value: path ?? 'Não disponível',
+                      isPath: true,
+                    ),
+                  ],
+                  _buildInfoRow(
+                    icon: Icons.timer_rounded,
+                    label: 'Duração',
+                    value: '$formattedDuration (${track.durationMs} ms)',
+                  ),
+                  const SizedBox(height: 16),
+
+                  // ── INFORMAÇÕES DO SPOTIFY (METADADOS) ────────────────
+                  _buildSectionHeader('Metadados do Spotify'),
+                  _buildInfoRow(
+                    icon: Icons.fingerprint_rounded,
+                    label: 'ISRC (Código de Registro)',
+                    value: track.isrc.isNotEmpty ? track.isrc : 'Não disponível',
+                  ),
+                  _buildInfoRow(
+                    icon: Icons.perm_identity_rounded,
+                    label: 'Artista Primário',
+                    value: track.primaryArtist.isNotEmpty ? track.primaryArtist : track.artist,
+                  ),
+                  _buildInfoRow(
+                    icon: Icons.art_track_rounded,
+                    label: 'Artista do Álbum',
+                    value: track.albumArtist.isNotEmpty ? track.albumArtist : 'Não disponível',
+                  ),
+                  _buildInfoRow(
+                    icon: Icons.date_range_rounded,
+                    label: 'Data de Lançamento',
+                    value: track.releaseDate.isNotEmpty ? track.releaseDate : (track.releaseYear.isNotEmpty ? track.releaseYear : 'Não disponível'),
+                  ),
+                  _buildInfoRow(
+                    icon: Icons.numbers_rounded,
+                    label: 'Faixa nº / Total',
+                    value: '${track.trackNumber} de ${track.totalTracks}',
+                  ),
+                  if (track.discNumber > 1)
+                    _buildInfoRow(
+                      icon: Icons.album_rounded,
+                      label: 'Volume / Disco nº',
+                      value: 'Disco ${track.discNumber}',
+                    ),
+                  _buildInfoRow(
+                    icon: Icons.explicit_rounded,
+                    label: 'Conteúdo explícito',
+                    value: track.explicit ? 'Sim' : 'Não',
+                    valueColor: track.explicit ? Colors.redAccent : Colors.greenAccent,
+                  ),
+                  _buildInfoRow(
+                    icon: Icons.link_rounded,
+                    label: 'Spotify URI',
+                    value: track.spotifyUri,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // ── GÊNEROS (TAGS COLORIDAS) ─────────────────────────
+                  if (track.genres.isNotEmpty) ...[
+                    _buildSectionHeader('Gêneros Musicais'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: track.genres.map((g) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.accent.withOpacity(0.3), width: 1),
+                          ),
+                          child: Text(
+                            g,
+                            style: TextStyle(
+                              color: AppColors.accent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+Widget _buildSectionHeader(String title) {
+  return Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 12),
+    child: Text(
+      title,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 14,
+        fontWeight: FontWeight.bold,
+        letterSpacing: 0.5,
+      ),
+    ),
+  );
+}
+
+Widget _buildInfoRow({
+  required IconData icon,
+  required String label,
+  required String value,
+  Color? valueColor,
+  bool isPath = false,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: AppColors.textMuted),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(
+                  color: valueColor ?? AppColors.textPrimary,
+                  fontSize: 13,
+                  fontFamily: isPath ? 'monospace' : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
 }
