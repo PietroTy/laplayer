@@ -49,14 +49,14 @@ class SearchService {
           'https://raw.githubusercontent.com/$_githubRepo/main/server_url.txt?t=$timestamp';
       final res = await tempDio.get(rawUrl);
       if (res.statusCode == 200 && res.data != null) {
-        final fetched = res.data.toString().trim();
+        final fetched = res.data.toString().replaceAll(RegExp(r'\s+'), '');
         if (fetched.startsWith('http')) {
           await prefs.setString('server_url', fetched);
         }
       }
     } catch (_) {}
 
-    final cached = prefs.getString('server_url')?.trim() ?? '';
+    final cached = prefs.getString('server_url')?.replaceAll(RegExp(r'\s+'), '') ?? '';
     if (cached.isEmpty) {
       throw Exception('Servidor indisponível. Verifique a conexão.');
     }

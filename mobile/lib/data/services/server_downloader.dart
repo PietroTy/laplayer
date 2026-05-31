@@ -36,7 +36,7 @@ class ServerDownloader {
         final rawUrl = "https://raw.githubusercontent.com/$githubRepo/main/server_url.txt?t=$timestamp";
         final response = await tempDio.get(rawUrl);
         if (response.statusCode == 200 && response.data != null) {
-          final fetchedUrl = response.data.toString().trim();
+          final fetchedUrl = response.data.toString().replaceAll(RegExp(r'\s+'), '');
           if (fetchedUrl.startsWith("http")) {
             await prefs.setString('server_url', fetchedUrl);
             print("[ServerDownloader] URL atualizada via GitHub: $fetchedUrl");
@@ -47,7 +47,7 @@ class ServerDownloader {
       }
 
       // ── 2. Método fallback: URL manual / cache ──────────────────────────
-      var serverUrl = prefs.getString('server_url')?.trim() ?? '';
+      var serverUrl = prefs.getString('server_url')?.replaceAll(RegExp(r'\s+'), '') ?? '';
 
       if (serverUrl.isEmpty) {
         throw Exception(
