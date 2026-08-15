@@ -1,24 +1,39 @@
 # ===========================================================================
 # laPlayer - Git Distribution Config
-# Ignore everything except release distribution artifacts & configurations
+# Ignore secrets, credentials, tokens, logs, and build outputs
 # ===========================================================================
 
-# Ignore all files and directories by default
-*
+# Credentials, secrets & tokens (nunca commitar!)
+credentials*.json
+google*.json
+cookies.txt
+*.env
+.env*
+.backend.log
+.backend.pid
+.tunnel.log
+.tunnel.pid
+*.log
+*.pid
+start_server.sh
 
-# Allow scanning of directories so whitelisted files inside them are found
-!*/
+# Python & Node temporary caches
+__pycache__/
+*.pyc
+node_modules/
+.wwebjs_auth/
+.wwebjs_cache/
 
-# Whitelist distribution files
+# Flutter build outputs
+mobile/build/
+mobile/.dart_tool/
+server/temp_downloads/
+*.m4a
+*.webm
+*.ogg
+
+# Whitelist distribution files & source code
 !.gitignore
 !README.md
 !server_url.txt
 !app-release.apk
-
-# Also whitelist the original compiled APK path in the build outputs
-!mobile/
-!mobile/build/
-!mobile/build/app/
-!mobile/build/app/outputs/
-!mobile/build/app/outputs/flutter-apk/
-!mobile/build/app/outputs/flutter-apk/app-release.apk

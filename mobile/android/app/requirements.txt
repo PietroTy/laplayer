@@ -1,0 +1,13 @@
+# Dependências Python para o app (Chaquopy)
+librespot
+protobuf
+pycryptodome
+pycryptodomex
+websocket-client
+defusedxml
+requests
+urllib3
+certifi
+idna
+charset_normalizer
+mutagen

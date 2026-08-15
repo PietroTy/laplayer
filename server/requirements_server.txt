@@ -1,0 +1,3 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+# Os demais já estão no requirements.txt original do backup script
