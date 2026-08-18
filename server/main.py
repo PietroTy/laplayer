@@ -670,6 +670,67 @@ async def download_track(
         filename=f"{request.artist} - {request.title}.{final_ext}"
     )
 
+# ── Spotify Proxy Endpoints ────────────────────────────────────────────────
+@app.get("/api/spotify/token")
+async def get_spotify_token():
+    """
+    Obtém um access_token anônimo oficial do Spotify via servidor.
+    Serve como fallback quando dispositivos móveis sofrem bloqueio de operadora ou CAPTCHA.
+    """
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    })
+    
+    urls = [
+        "https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT",
+        "https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M",
+        "https://open.spotify.com/embed/album/1DFKiOD2v3vTjY2RocuF5M"
+    ]
+    
+    for url in urls:
+        try:
+            resp = session.get(url, timeout=6)
+            if resp.status_code == 200:
+                match = re.search(r'"accessToken":"([^"]+)"', resp.text)
+                if match and match.group(1):
+                    return {"access_token": match.group(1)}
+        except Exception as e:
+            print(f"[Backend] Erro ao obter token do Spotify via {url}: {e}")
+            
+    raise HTTPException(status_code=500, detail="Não foi possível obter token do Spotify via servidor")
+
+@app.get("/api/spotify/search")
+async def spotify_search_proxy(q: str, limit: int = 20):
+    """
+    Busca faixas na API do Spotify diretamente através do servidor (Proxy resiliente).
+    """
+    if not q or not q.strip():
+        return {"tracks": {"items": []}}
+        
+    token_data = await get_spotify_token()
+    token = token_data["access_token"]
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    try:
+        resp = requests.get(
+            "https://api.spotify.com/v1/search",
+            params={"q": q, "type": "track", "limit": max(1, min(limit, 50))},
+            headers=headers,
+            timeout=8
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        raise HTTPException(status_code=resp.status_code, detail=f"Erro Spotify API: HTTP {resp.status_code}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar no Spotify via servidor: {e}")
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 3004))
