@@ -10,11 +10,12 @@ import '../../providers/player_provider.dart';
 import '../../data/models/player_state.dart' as app;
 import 'track_tile.dart';
 
-class ArtistListView extends ConsumerWidget {
+class ArtistListView extends ConsumerStatefulWidget {
   final List<ArtistGroup> artists;
   final String? playlistId;
   final bool shrinkWrap;
   final ScrollPhysics? physics;
+  final bool isScrolling;
 
   const ArtistListView({
     super.key,
@@ -22,11 +23,19 @@ class ArtistListView extends ConsumerWidget {
     this.playlistId,
     this.shrinkWrap = false,
     this.physics,
+    this.isScrolling = false,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    if (artists.isEmpty) {
+  ConsumerState<ArtistListView> createState() => _ArtistListViewState();
+}
+
+class _ArtistListViewState extends ConsumerState<ArtistListView> {
+  bool _localIsScrolling = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.artists.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 60),
         child: Center(
@@ -36,18 +45,63 @@ class ArtistListView extends ConsumerWidget {
       );
     }
 
-    return ListView.separated(
-      shrinkWrap: shrinkWrap,
-      physics: physics,
-      padding: const EdgeInsets.only(bottom: 100),
-      itemCount: artists.length,
-      separatorBuilder: (_, __) => Divider(
-        color: AppColors.border.withOpacity(0.3), height: 1,
-        indent: 72,
+    final isFastScrolling = widget.isScrolling || _localIsScrolling;
+
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollStartNotification) {
+          if (!_localIsScrolling) setState(() => _localIsScrolling = true);
+        } else if (notification is ScrollUpdateNotification) {
+          final v = notification.scrollDelta?.abs() ?? 0;
+          if (v > 40 && !_localIsScrolling) setState(() => _localIsScrolling = true);
+        } else if (notification is ScrollEndNotification) {
+          if (_localIsScrolling) setState(() => _localIsScrolling = false);
+        }
+        return false;
+      },
+      child: ListView.separated(
+        shrinkWrap: widget.shrinkWrap,
+        physics: widget.physics,
+        padding: const EdgeInsets.only(bottom: 100),
+        itemCount: widget.artists.length,
+        separatorBuilder: (_, __) => Divider(
+          color: AppColors.border.withOpacity(0.3), height: 1,
+          indent: 72,
+        ),
+        itemBuilder: (context, i) {
+          if (isFastScrolling) {
+            return const _ArtistTilePlaceholder();
+          }
+          return _ArtistTile(
+            artist: widget.artists[i],
+            playlistId: widget.playlistId,
+          );
+        },
       ),
-      itemBuilder: (context, i) => _ArtistTile(
-        artist: artists[i],
-        playlistId: playlistId,
+    );
+  }
+}
+
+class _ArtistTilePlaceholder extends StatelessWidget {
+  const _ArtistTilePlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: const CircleAvatar(
+        radius: 24,
+        backgroundColor: AppColors.surfaceHigh,
+        child: Icon(Icons.person_rounded, color: Colors.white10, size: 24),
+      ),
+      title: Container(
+        width: 100, height: 12,
+        decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(4)),
+      ),
+      subtitle: Container(
+        width: 150, height: 10,
+        margin: const EdgeInsets.only(top: 4),
+        decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(4)),
       ),
     );
   }
@@ -65,7 +119,13 @@ class _ArtistTile extends ConsumerWidget {
       leading: CircleAvatar(
         radius: 24,
         backgroundColor: AppColors.surfaceHigh,
-        backgroundImage: artist.coverArtUrl != null ? CachedNetworkImageProvider(artist.coverArtUrl!) : null,
+        backgroundImage: artist.coverArtUrl != null
+            ? ResizeImage(
+                CachedNetworkImageProvider(artist.coverArtUrl!),
+                width: 150,
+                height: 150,
+              )
+            : null,
         child: artist.coverArtUrl == null ? const Icon(Icons.person_rounded, color: AppColors.textMuted, size: 24) : null,
       ),
       title: Text(

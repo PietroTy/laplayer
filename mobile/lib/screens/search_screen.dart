@@ -105,23 +105,24 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
     setState(() => _groupLoading = true);
 
-    final trackRes = await AppDatabase.instance.searchTracks(
-      q,
-      cachedOnly: _activeFilter == _SearchFilter.downloaded
-          ? true
-          : _activeFilter == _SearchFilter.pending
-              ? false
-              : null,
-    );
-
-    final albumRes = await AppDatabase.instance.searchAlbums(q);
-    final artistRes = await AppDatabase.instance.searchArtists(q);
+    final results = await Future.wait([
+      AppDatabase.instance.searchTracks(
+        q,
+        cachedOnly: _activeFilter == _SearchFilter.downloaded
+            ? true
+            : _activeFilter == _SearchFilter.pending
+                ? false
+                : null,
+      ),
+      AppDatabase.instance.searchAlbums(q, limit: 50),
+      AppDatabase.instance.searchArtists(q, limit: 50),
+    ]);
 
     if (mounted) {
       setState(() {
-        _localResults = trackRes;
-        _albumResults = albumRes;
-        _artistResults = artistRes;
+        _localResults = results[0] as List<Track>;
+        _albumResults = results[1] as List<AlbumGroup>;
+        _artistResults = results[2] as List<ArtistGroup>;
         _groupLoading = false;
       });
     }

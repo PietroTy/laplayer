@@ -446,15 +446,18 @@ class AppDatabase {
     return result;
   }
 
-  Future<List<AlbumGroup>> searchAlbums(String query, {String? playlistId}) async {
+  Future<List<AlbumGroup>> searchAlbums(String query, {String? playlistId, int? limit = 60}) async {
     final database = await db;
     final q = '%$query%';
     final whereClause = playlistId != null
         ? 'AND (t.playlist_id = ? OR t.id IN (SELECT track_id FROM playlist_tracks WHERE playlist_id = ?))'
         : '';
-    final args = playlistId != null
+    final limitClause = limit != null ? 'LIMIT ?' : '';
+    final List<Object> args = playlistId != null
         ? [q, q, q, q, playlistId, playlistId]
         : [q, q, q, q];
+    if (limit != null) args.add(limit);
+
     final rows = await database.rawQuery('''
       SELECT
         t.album,
@@ -471,6 +474,7 @@ class AppDatabase {
         $whereClause
       GROUP BY t.album
       ORDER BY t.album ASC
+      $limitClause
     ''', args);
     return rows.map((r) => AlbumGroup(
       albumName: r['album'] as String? ?? '',
@@ -505,13 +509,16 @@ class AppDatabase {
     }
   }
 
-  Future<List<ArtistGroup>> searchArtists(String query, {String? playlistId}) async {
+  Future<List<ArtistGroup>> searchArtists(String query, {String? playlistId, int? limit = 60}) async {
     final database = await db;
     final q = '%$query%';
     final whereClause = playlistId != null
         ? 'AND (t.playlist_id = ? OR t.id IN (SELECT track_id FROM playlist_tracks WHERE playlist_id = ?))'
         : '';
-    final args = playlistId != null ? [q, q, q, playlistId, playlistId] : [q, q, q];
+    final limitClause = limit != null ? 'LIMIT ?' : '';
+    final List<Object> args = playlistId != null ? [q, q, q, playlistId, playlistId] : [q, q, q];
+    if (limit != null) args.add(limit);
+
     final rows = await database.rawQuery('''
       SELECT
         COALESCE(NULLIF(t.primary_artist, ''), NULLIF(t.artist, ''), 'Artista Desconhecido') as artist_name,
@@ -525,6 +532,7 @@ class AppDatabase {
         $whereClause
       GROUP BY COALESCE(NULLIF(t.primary_artist, ''), NULLIF(t.artist, ''), 'Artista Desconhecido')
       ORDER BY artist_name ASC
+      $limitClause
     ''', args);
     return rows.map((r) => ArtistGroup(
       name: r['artist_name'] as String? ?? '',

@@ -104,7 +104,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
 
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 300), () {
+    _debounce = Timer(const Duration(milliseconds: 400), () {
       if (mounted) {
         setState(() => _searchQuery = query);
         _loadGroupedResults(query);
@@ -526,6 +526,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                               playlistId: widget.playlistId,
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
+                              isScrolling: _isScrolling && _velocity > 200,
                             ),
                     )
                   else if (_activeFilter == _SearchFilter.artists)
@@ -540,6 +541,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                               playlistId: widget.playlistId,
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
+                              isScrolling: _isScrolling && _velocity > 200,
                             ),
                     )
                   else
