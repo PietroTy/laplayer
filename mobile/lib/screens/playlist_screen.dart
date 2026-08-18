@@ -457,44 +457,6 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    // Smart Shuffle Play (Shuffle+)
-                                    GestureDetector(
-                                      onTap: () => ref.read(playerProvider.notifier).playQueueWithShuffle(
-                                        allAvailableTracks,
-                                        shuffleMode: app.ShuffleMode.smart,
-                                      ),
-                                      child: Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          border: Border.all(color: AppColors.accent, width: 1.5),
-                                          color: Colors.transparent,
-                                        ),
-                                        child: Center(
-                                          child: Stack(
-                                            clipBehavior: Clip.none,
-                                            children: [
-                                              Icon(
-                                                Icons.shuffle_rounded,
-                                                size: 20,
-                                                color: AppColors.accent,
-                                              ),
-                                              Positioned(
-                                                right: -5,
-                                                top: -5,
-                                                child: Icon(
-                                                  Icons.auto_awesome_rounded,
-                                                  color: AppColors.accent,
-                                                  size: 10,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
                                     // Shuffle Play (Shuffle)
                                     GestureDetector(
                                       onTap: () => ref.read(playerProvider.notifier).playQueueWithShuffle(

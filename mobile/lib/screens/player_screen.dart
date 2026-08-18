@@ -269,33 +269,16 @@ class PlayerScreen extends ConsumerWidget {
                     children: [
                       // Shuffle
                       IconButton(
-                        icon: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Icon(
-                              Icons.shuffle_rounded,
-                              color: state.shuffleMode != app.ShuffleMode.off
-                                  ? palette.accent
-                                  : Colors.white38,
-                              size: 26,
-                            ),
-                            if (state.shuffleMode == app.ShuffleMode.smart)
-                              Positioned(
-                                right: -6,
-                                top: -6,
-                                child: Icon(
-                                  Icons.auto_awesome_rounded,
-                                  color: palette.accent,
-                                  size: 12,
-                                ),
-                              ),
-                          ],
+                        icon: Icon(
+                          Icons.shuffle_rounded,
+                          color: state.shuffleMode != app.ShuffleMode.off
+                              ? palette.accent
+                              : Colors.white38,
+                          size: 26,
                         ),
                         iconSize: 26,
                         onPressed: player.cycleShuffle,
-                        tooltip: state.shuffleMode == app.ShuffleMode.smart
-                            ? 'Smart Shuffle (Gêneros)'
-                            : 'Shuffle',
+                        tooltip: 'Shuffle',
                       ),
                       // Previous
                       IconButton(

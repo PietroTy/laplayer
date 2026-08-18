@@ -89,7 +89,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Future<void> _searchLocal(String query) async {
-    if (query.trim().length < 2 &&
+    final q = query.trim();
+    if (q.length < 2 &&
         _activeFilter != _SearchFilter.albums &&
         _activeFilter != _SearchFilter.artists) {
       setState(() {
@@ -97,29 +98,32 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         _spotifyResults = [];
         _albumResults = [];
         _artistResults = [];
+        _groupLoading = false;
       });
       return;
     }
 
-    // Filtra conforme o modo ativo
-    if (_activeFilter == _SearchFilter.albums) {
-      setState(() => _groupLoading = true);
-      final res = await AppDatabase.instance.searchAlbums(query);
-      if (mounted) setState(() { _albumResults = res; _groupLoading = false; });
-    } else if (_activeFilter == _SearchFilter.artists) {
-      setState(() => _groupLoading = true);
-      final res = await AppDatabase.instance.searchArtists(query);
-      if (mounted) setState(() { _artistResults = res; _groupLoading = false; });
-    } else {
-      final res = await AppDatabase.instance.searchTracks(
-        query,
-        cachedOnly: _activeFilter == _SearchFilter.downloaded
-            ? true
-            : _activeFilter == _SearchFilter.pending
-                ? false
-                : null,
-      );
-      if (mounted) setState(() => _localResults = res);
+    setState(() => _groupLoading = true);
+
+    final trackRes = await AppDatabase.instance.searchTracks(
+      q,
+      cachedOnly: _activeFilter == _SearchFilter.downloaded
+          ? true
+          : _activeFilter == _SearchFilter.pending
+              ? false
+              : null,
+    );
+
+    final albumRes = await AppDatabase.instance.searchAlbums(q);
+    final artistRes = await AppDatabase.instance.searchArtists(q);
+
+    if (mounted) {
+      setState(() {
+        _localResults = trackRes;
+        _albumResults = albumRes;
+        _artistResults = artistRes;
+        _groupLoading = false;
+      });
     }
   }
 

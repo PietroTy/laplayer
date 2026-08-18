@@ -453,12 +453,12 @@ class AppDatabase {
         ? 'AND t.id IN (SELECT track_id FROM playlist_tracks WHERE playlist_id = ?)'
         : '';
     final args = playlistId != null
-        ? [q, q, q, playlistId]
-        : [q, q, q];
+        ? [q, q, q, q, playlistId]
+        : [q, q, q, q];
     final rows = await database.rawQuery('''
       SELECT
         t.album,
-        t.album_artist,
+        COALESCE(NULLIF(t.album_artist, ''), NULLIF(t.artist, ''), NULLIF(t.primary_artist, ''), 'Vários Artistas') as album_artist,
         t.album_art_url,
         t.release_year,
         COUNT(*) as total_tracks,
@@ -466,10 +466,10 @@ class AppDatabase {
         (SELECT GROUP_CONCAT(DISTINCT pt2.playlist_id) 
          FROM playlist_tracks pt2 WHERE pt2.track_id = t.id) as playlist_ids
       FROM tracks t
-      WHERE (t.album LIKE ? OR t.artist LIKE ? OR t.title LIKE ?)
-        AND t.album != ''
+      WHERE (t.album LIKE ? OR t.artist LIKE ? OR t.primary_artist LIKE ? OR t.title LIKE ?)
+        AND t.album IS NOT NULL AND t.album != ''
         $whereClause
-      GROUP BY t.album, t.album_artist
+      GROUP BY t.album
       ORDER BY t.album ASC
     ''', args);
     return rows.map((r) => AlbumGroup(
@@ -510,20 +510,20 @@ class AppDatabase {
     final whereClause = playlistId != null
         ? 'AND t.id IN (SELECT track_id FROM playlist_tracks WHERE playlist_id = ?)'
         : '';
-    final args = playlistId != null ? [q, q, playlistId] : [q, q];
+    final args = playlistId != null ? [q, q, q, playlistId] : [q, q, q];
     final rows = await database.rawQuery('''
       SELECT
-        t.primary_artist as artist_name,
+        COALESCE(NULLIF(t.primary_artist, ''), NULLIF(t.artist, ''), 'Artista Desconhecido') as artist_name,
         t.album_art_url,
         COUNT(*) as total_tracks,
         SUM(t.is_cached) as downloaded_tracks,
         COUNT(DISTINCT t.album) as album_count
       FROM tracks t
-      WHERE (t.primary_artist LIKE ? OR t.artist LIKE ?)
-        AND t.primary_artist != ''
+      WHERE (t.artist LIKE ? OR t.primary_artist LIKE ? OR t.title LIKE ?)
+        AND (COALESCE(NULLIF(t.primary_artist, ''), NULLIF(t.artist, ''), '') != '')
         $whereClause
-      GROUP BY t.primary_artist
-      ORDER BY t.primary_artist ASC
+      GROUP BY COALESCE(NULLIF(t.primary_artist, ''), NULLIF(t.artist, ''), 'Artista Desconhecido')
+      ORDER BY artist_name ASC
     ''', args);
     return rows.map((r) => ArtistGroup(
       name: r['artist_name'] as String? ?? '',
@@ -540,15 +540,15 @@ class AppDatabase {
       final rows = await database.rawQuery('''
         SELECT t.* FROM tracks t
         INNER JOIN playlist_tracks pt ON t.id = pt.track_id
-        WHERE t.primary_artist = ? AND pt.playlist_id = ?
+        WHERE (t.primary_artist = ? OR t.artist = ?) AND pt.playlist_id = ?
         ORDER BY t.album ASC, t.track_number ASC
-      ''', [artistName, playlistId]);
+      ''', [artistName, artistName, playlistId]);
       return rows.map(_rowToTrack).toList();
     } else {
       final rows = await database.query(
         'tracks',
-        where: 'primary_artist = ?',
-        whereArgs: [artistName],
+        where: 'primary_artist = ? OR artist = ?',
+        whereArgs: [artistName, artistName],
         orderBy: 'album ASC, track_number ASC',
       );
       return rows.map(_rowToTrack).toList();

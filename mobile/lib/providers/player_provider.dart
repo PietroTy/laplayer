@@ -476,8 +476,9 @@ class PlayerNotifier extends StateNotifier<app.PlayerState> {
   // - A reprodução NUNCA é interrompida durante a troca de modo.
 
   Future<void> cycleShuffle() async {
-    final next = app.ShuffleMode
-        .values[(state.shuffleMode.index + 1) % app.ShuffleMode.values.length];
+    final next = state.shuffleMode == app.ShuffleMode.off
+        ? app.ShuffleMode.random
+        : app.ShuffleMode.off;
     state = state.copyWith(shuffleMode: next);
 
     if (state.queue.isEmpty) return;
@@ -485,45 +486,28 @@ class PlayerNotifier extends StateNotifier<app.PlayerState> {
     final currentTrack = state.currentTrack;
     if (currentTrack == null) return;
 
-    // Resolve caminhos locais para garantir que só tracks válidas entrem na fila.
-    // Sem isso, state.queue pode ter N tracks mas o AudioPlayer ter M < N items,
-    // causando desalinhamento de índices (música X toca com capa de Y).
     final sync = _ref.read(syncProvider.notifier);
-    final playlistId = _originalQueue.isNotEmpty ? _originalQueue.first.playlistId : '';
     final localPathsMap = await sync.findLocalPathsBulk(_originalQueue);
 
-    // Filtra _originalQueue para manter apenas tracks com arquivo local válido
     final validOriginal = _originalQueue.where((t) => localPathsMap.containsKey(t.id)).toList();
     if (validOriginal.isEmpty) return;
 
     List<Track> newQueue;
 
     if (next == app.ShuffleMode.off) {
-      // Restaura a ordem original da playlist
       newQueue = List<Track>.from(validOriginal);
-    } else if (next == app.ShuffleMode.random) {
-      // Mantém a música atual na posição 0, embaralha todo o resto
+    } else {
       final others = List<Track>.from(validOriginal)
         ..removeWhere((t) => t.id == currentTrack.id);
       others.shuffle();
       newQueue = [currentTrack, ...others];
-    } else {
-      // Smart Shuffle (Shuffle Plus): ordena embaralhando primeiro e depois encadeando por gênero comum
-      final others = List<Track>.from(validOriginal)
-        ..removeWhere((t) => t.id == currentTrack.id);
-      
-      final smartOrder = _computeSmartShuffle(currentTrack, others);
-      newQueue = [currentTrack, ...smartOrder];
     }
 
-    // Localiza a música atual na nova ordem
     final newIndex = newQueue.indexWhere((t) => t.id == currentTrack.id);
     final safeIndex = newIndex >= 0 ? newIndex : 0;
 
-    // Constrói MediaItems SÓ das tracks que existem (garante alinhamento 1:1)
     final items = _buildMediaItemsFromMap(newQueue, localPathsMap);
 
-    // Atualiza state.queue e o AudioPlayer com listas de mesmo tamanho
     state = state.copyWith(queue: newQueue, currentIndex: safeIndex);
     await _audio.reloadQueue(items, safeIndex);
   }
@@ -533,20 +517,11 @@ class PlayerNotifier extends StateNotifier<app.PlayerState> {
     if (_originalQueue.isEmpty) return;
 
     final sync = _ref.read(syncProvider.notifier);
-    final playlistId = _originalQueue.first.playlistId;
     final localPathsMap = await sync.findLocalPathsBulk(_originalQueue);
     final validOriginal = _originalQueue.where((t) => localPathsMap.containsKey(t.id)).toList();
     if (validOriginal.isEmpty) return;
 
-    List<Track> newQueue;
-    
-    if (state.shuffleMode == app.ShuffleMode.random) {
-      newQueue = List<Track>.from(validOriginal)..shuffle();
-    } else {
-      // Smart Shuffle reroll
-      final shuffled = List<Track>.from(validOriginal)..shuffle();
-      newQueue = [shuffled.first, ..._computeSmartShuffle(shuffled.first, shuffled.sublist(1))];
-    }
+    final newQueue = List<Track>.from(validOriginal)..shuffle();
 
     final items = _buildMediaItemsFromMap(newQueue, localPathsMap);
     state = state.copyWith(queue: newQueue, currentIndex: 0);
@@ -616,68 +591,6 @@ class PlayerNotifier extends StateNotifier<app.PlayerState> {
     return items;
   }
 
-  List<Track> _computeSmartShuffle(Track firstTrack, List<Track> others) {
-    final othersShuffled = List<Track>.from(others)..shuffle();
-    final smartOrder = <Track>[];
-
-    final Map<String, List<Track>> genreToTracks = {};
-    for (final track in othersShuffled) {
-      for (final genre in track.genres) {
-        genreToTracks.putIfAbsent(genre, () => []).add(track);
-      }
-    }
-
-    final Map<String, int> genreIndices = {};
-    for (final genre in genreToTracks.keys) {
-      genreIndices[genre] = 0;
-    }
-
-    final unvisitedIds = Set<String>.from(othersShuffled.map((t) => t.id));
-    int fallbackIndex = 0;
-    Track last = firstTrack;
-
-    while (unvisitedIds.isNotEmpty) {
-      Track? nextTrack;
-
-      for (final genre in last.genres) {
-        final list = genreToTracks[genre];
-        if (list != null) {
-          int idx = genreIndices[genre] ?? 0;
-          while (idx < list.length) {
-            final candidate = list[idx];
-            idx++;
-            if (unvisitedIds.contains(candidate.id)) {
-              nextTrack = candidate;
-              break;
-            }
-          }
-          genreIndices[genre] = idx;
-        }
-        if (nextTrack != null) break;
-      }
-
-      if (nextTrack == null) {
-        while (fallbackIndex < othersShuffled.length) {
-          final candidate = othersShuffled[fallbackIndex++];
-          if (unvisitedIds.contains(candidate.id)) {
-            nextTrack = candidate;
-            break;
-          }
-        }
-      }
-
-      if (nextTrack != null) {
-        smartOrder.add(nextTrack);
-        unvisitedIds.remove(nextTrack.id);
-        last = nextTrack;
-      } else {
-        break;
-      }
-    }
-
-    return smartOrder;
-  }
-
   /// Constrói uma fila embaralhada mantendo a track selecionada na posição 0.
   /// Spotify-like: a música clicada fica primeiro, o resto é shuffled.
   List<Track> _buildShuffledQueue(
@@ -689,12 +602,8 @@ class PlayerNotifier extends StateNotifier<app.PlayerState> {
 
     if (mode == app.ShuffleMode.random) {
       others.shuffle();
-      return [selected, ...others];
     }
-
-    // Smart shuffle por gêneros (Shuffle Plus) - OTIMIZADO O(N)
-    final smartOrder = _computeSmartShuffle(selected, others);
-    return [selected, ...smartOrder];
+    return [selected, ...others];
   }
 }
 

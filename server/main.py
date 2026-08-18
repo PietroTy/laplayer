@@ -1,3 +1,4 @@
+import unicodedata
 import os
 import time
 import shutil

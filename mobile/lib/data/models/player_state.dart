@@ -2,7 +2,7 @@ import 'track.dart';
 
 enum RepeatMode { off, all, one }
 
-enum ShuffleMode { off, random, smart }
+enum ShuffleMode { off, random }
 
 enum PlayerStatus { idle, loading, playing, paused, error }
 
