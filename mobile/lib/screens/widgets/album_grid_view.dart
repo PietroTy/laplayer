@@ -13,11 +13,17 @@ import 'track_tile.dart';
 class AlbumGridView extends ConsumerWidget {
   final List<AlbumGroup> albums;
   final Map<String, String> playlistNames; // playlistId → name
+  final String? playlistId;
+  final bool shrinkWrap;
+  final ScrollPhysics? physics;
 
   const AlbumGridView({
     super.key,
     required this.albums,
     required this.playlistNames,
+    this.playlistId,
+    this.shrinkWrap = false,
+    this.physics,
   });
 
   @override
@@ -33,6 +39,8 @@ class AlbumGridView extends ConsumerWidget {
     }
 
     return GridView.builder(
+      shrinkWrap: shrinkWrap,
+      physics: physics,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 100),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
@@ -44,6 +52,7 @@ class AlbumGridView extends ConsumerWidget {
       itemBuilder: (context, i) => _AlbumCard(
         album: albums[i],
         playlistNames: playlistNames,
+        playlistId: playlistId,
       ),
     );
   }
@@ -52,7 +61,12 @@ class AlbumGridView extends ConsumerWidget {
 class _AlbumCard extends ConsumerWidget {
   final AlbumGroup album;
   final Map<String, String> playlistNames;
-  const _AlbumCard({required this.album, required this.playlistNames});
+  final String? playlistId;
+  const _AlbumCard({
+    required this.album,
+    required this.playlistNames,
+    this.playlistId,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -152,6 +166,7 @@ class _AlbumCard extends ConsumerWidget {
       builder: (_) => _AlbumTracksSheet(
         album: album,
         playlistNames: playlistNames,
+        playlistId: playlistId,
       ),
     );
   }
@@ -160,7 +175,12 @@ class _AlbumCard extends ConsumerWidget {
 class _AlbumTracksSheet extends ConsumerStatefulWidget {
   final AlbumGroup album;
   final Map<String, String> playlistNames;
-  const _AlbumTracksSheet({required this.album, required this.playlistNames});
+  final String? playlistId;
+  const _AlbumTracksSheet({
+    required this.album,
+    required this.playlistNames,
+    this.playlistId,
+  });
 
   @override
   ConsumerState<_AlbumTracksSheet> createState() => _AlbumTracksSheetState();
@@ -177,7 +197,10 @@ class _AlbumTracksSheetState extends ConsumerState<_AlbumTracksSheet> {
   }
 
   Future<void> _load() async {
-    final tracks = await AppDatabase.instance.getTracksForAlbum(widget.album.albumName);
+    final tracks = await AppDatabase.instance.getTracksForAlbum(
+      widget.album.albumName,
+      playlistId: widget.playlistId,
+    );
     if (mounted) setState(() { _tracks = tracks; _loading = false; });
   }
 

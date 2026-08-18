@@ -13,11 +13,15 @@ import 'track_tile.dart';
 class ArtistListView extends ConsumerWidget {
   final List<ArtistGroup> artists;
   final String? playlistId;
+  final bool shrinkWrap;
+  final ScrollPhysics? physics;
 
   const ArtistListView({
     super.key,
     required this.artists,
     this.playlistId,
+    this.shrinkWrap = false,
+    this.physics,
   });
 
   @override
@@ -33,6 +37,8 @@ class ArtistListView extends ConsumerWidget {
     }
 
     return ListView.separated(
+      shrinkWrap: shrinkWrap,
+      physics: physics,
       padding: const EdgeInsets.only(bottom: 100),
       itemCount: artists.length,
       separatorBuilder: (_, __) => Divider(

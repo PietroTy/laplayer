@@ -523,6 +523,9 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                           : AlbumGridView(
                               albums: _albumResults,
                               playlistNames: {widget.playlistId: widget.playlistName},
+                              playlistId: widget.playlistId,
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
                             ),
                     )
                   else if (_activeFilter == _SearchFilter.artists)
@@ -535,6 +538,8 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                           : ArtistListView(
                               artists: _artistResults,
                               playlistId: widget.playlistId,
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
                             ),
                     )
                   else
