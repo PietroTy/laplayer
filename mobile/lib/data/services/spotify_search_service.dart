@@ -174,7 +174,7 @@ class SpotifySearchService {
 
       return Track(
         id: id,
-        spotifyUri: 'spotify:track:$id',
+        spotifyUri: id.startsWith('yt_') ? 'youtube:${id.substring(3)}' : 'spotify:track:$id',
         title: title,
         artist: artists.isNotEmpty ? artists : 'Artista Desconhecido',
         album: album,

@@ -62,7 +62,7 @@ def _get_base_opts() -> dict:
     
     # Enable the remote component challenge solver script needed for YouTube JS challenge solving
     opts["remote_components"] = "ejs:github"
-    opts["extractor_args"] = {"youtube": {"player_client": ["android_vr", "web"]}}
+    opts["extractor_args"] = {"youtube": {"player_client": ["android", "web"]}}
     return opts
 
 # Print configuration status on import
@@ -671,65 +671,137 @@ async def download_track(
     )
 
 # ── Spotify Proxy Endpoints ────────────────────────────────────────────────
-@app.get("/api/spotify/token")
-async def get_spotify_token():
-    """
-    Obtém um access_token anônimo oficial do Spotify via servidor.
-    Serve como fallback quando dispositivos móveis sofrem bloqueio de operadora ou CAPTCHA.
-    """
+_spotify_token_cache: Optional[str] = None
+_spotify_token_time: float = 0
+
+def fetch_fresh_spotify_token() -> Optional[str]:
+    """Obtém um access_token anônimo rotacionando múltiplas fontes."""
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     })
     
     urls = [
-        "https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT",
         "https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M",
-        "https://open.spotify.com/embed/album/1DFKiOD2v3vTjY2RocuF5M"
+        "https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT",
+        "https://open.spotify.com/embed/playlist/37i9dQZF1DX0Xbv3uHJ12g",
     ]
     
     for url in urls:
         try:
-            resp = session.get(url, timeout=6)
+            resp = session.get(url, timeout=5)
             if resp.status_code == 200:
                 match = re.search(r'"accessToken":"([^"]+)"', resp.text)
                 if match and match.group(1):
-                    return {"access_token": match.group(1)}
+                    return match.group(1)
         except Exception as e:
             print(f"[Backend] Erro ao obter token do Spotify via {url}: {e}")
             
-    raise HTTPException(status_code=500, detail="Não foi possível obter token do Spotify via servidor")
+    return None
+
+@app.get("/api/spotify/token")
+async def get_spotify_token(force_refresh: bool = False):
+    """
+    Obtém um access_token do Spotify com cache inteligente e renovação em caso de erro.
+    """
+    global _spotify_token_cache, _spotify_token_time
+    now = time.time()
+    
+    if not force_refresh and _spotify_token_cache and (now - _spotify_token_time < 1800):
+        return {"access_token": _spotify_token_cache}
+        
+    token = fetch_fresh_spotify_token()
+    if token:
+        _spotify_token_cache = token
+        _spotify_token_time = now
+        return {"access_token": token}
+        
+    if _spotify_token_cache:
+        return {"access_token": _spotify_token_cache}
+        
+    raise HTTPException(status_code=500, detail="Não foi possível obter token do Spotify no momento.")
 
 @app.get("/api/spotify/search")
 async def spotify_search_proxy(q: str, limit: int = 20):
     """
-    Busca faixas na API do Spotify diretamente através do servidor (Proxy resiliente).
+    Busca faixas resiliente (Spotify API com retry em 429 e fallback gracioso para busca online).
     """
     if not q or not q.strip():
         return {"tracks": {"items": []}}
-        
-    token_data = await get_spotify_token()
-    token = token_data["access_token"]
+
+    limit = max(1, min(limit, 50))
     
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
+    # ── Tentativa 1 & 2: API do Spotify com auto-refresh de token ──
+    for attempt in range(2):
+        try:
+            token_res = await get_spotify_token(force_refresh=(attempt > 0))
+            token = token_res["access_token"]
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            
+            resp = requests.get(
+                "https://api.spotify.com/v1/search",
+                params={"q": q, "type": "track", "limit": limit},
+                headers=headers,
+                timeout=6
+            )
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("tracks", {}).get("items", [])
+                if items:
+                    return data
+            elif resp.status_code in (429, 401, 403):
+                print(f"[Backend] Spotify API retornou HTTP {resp.status_code}. Forçando renovação do token...")
+                global _spotify_token_cache
+                _spotify_token_cache = None
+        except Exception as e:
+            print(f"[Backend] Erro na busca do Spotify (tentativa {attempt + 1}): {e}")
+
+    # ── Fallback Gracioso: Busca via YouTube convertida para o modelo de faixas do Spotify ──
+    print(f"[Backend] Spotify API indisponível/rate-limited. Executando busca online via YouTube fallback para '{q}'...")
     try:
-        resp = requests.get(
-            "https://api.spotify.com/v1/search",
-            params={"q": q, "type": "track", "limit": max(1, min(limit, 50))},
-            headers=headers,
-            timeout=8
-        )
-        if resp.status_code == 200:
-            return resp.json()
-        raise HTTPException(status_code=resp.status_code, detail=f"Erro Spotify API: HTTP {resp.status_code}")
+        search_opts = {
+            'extract_flat': True,
+            'quiet': True,
+            'no_warnings': True,
+            'nocheckcertificate': True,
+            'geo_bypass': True,
+            **_get_base_opts(),
+        }
+        with yt_dlp.YoutubeDL(search_opts) as ydl:
+            results = ydl.extract_info(f"ytsearch{limit}:{q.strip()}", download=False)
+            
+        entries = results.get("entries", []) if results else []
+        spotify_items = []
+        
+        for entry in entries:
+            if not entry: continue
+            vid_id = entry.get("id") or ""
+            title = entry.get("title") or ""
+            uploader = entry.get("uploader") or entry.get("channel") or "Artista Desconhecido"
+            duration = int((entry.get("duration") or 0) * 1000)
+            
+            thumbnails = entry.get("thumbnails") or []
+            thumb_url = thumbnails[-1].get("url") if thumbnails else ""
+            
+            spotify_items.append({
+                "id": f"yt_{vid_id}",
+                "name": title,
+                "artists": [{"name": uploader}],
+                "album": {"name": "Single", "images": [{"url": thumb_url}] if thumb_url else []},
+                "duration_ms": duration,
+            })
+            
+        return {"tracks": {"items": spotify_items}}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao buscar no Spotify via servidor: {e}")
+        print(f"[Backend] Erro no fallback de busca: {e}")
+        return {"tracks": {"items": []}}
 
 if __name__ == "__main__":
     import uvicorn
