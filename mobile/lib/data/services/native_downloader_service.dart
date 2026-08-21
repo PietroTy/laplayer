@@ -120,7 +120,7 @@ class NativeDownloaderService {
       'putaria': 'put4ria',
       // EN
       'fuck': 'f*ck',
-      'pussy': 'pu$$y',
+      'pussy': r'pu$$y',
       'dick': 'd!ck',
       'cock': 'c0ck',
       'porn': 'p0rn',
