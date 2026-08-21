@@ -31,8 +31,17 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _COOKIES_FILE = os.path.join(_SCRIPT_DIR, "cookies.txt")
 
 def _detect_cookie_opts() -> dict:
-    """Detect and return cookie options if valid, or empty dict to use default android_vr client."""
-    # android_vr client bypasses bot-detection without needing cookies.txt
+    """Detect and return cookie options if cookies.txt is valid, or empty dict."""
+    if os.path.exists(_COOKIES_FILE):
+        try:
+            jar = http.cookiejar.MozillaCookieJar(_COOKIES_FILE)
+            jar.load(ignore_discard=True, ignore_expires=True)
+            if len(jar) > 0:
+                print(f"[Backend] ✅ cookies.txt carregado com {len(jar)} cookies (necessário para buscar conteúdo NSFW/age-restricted)")
+                return {"cookiefile": _COOKIES_FILE}
+        except Exception as e:
+            print(f"[Backend] ⚠ cookies.txt encontrado mas inválido: {e}")
+    print("[Backend] ⚠ Nenhum cookies.txt válido — buscas de conteúdo NSFW/age-restricted podem falhar")
     return {}
 
 # Cached at startup – avoids re-probing on every request

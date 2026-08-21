@@ -85,6 +85,67 @@ class NativeDownloaderService {
     return cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
+  /// Sanitiza termos NSFW que o YouTube SafeSearch filtra, substituindo por versões censuradas.
+  /// Isso permite que a busca encontre vídeos que existem mas cujo título contém palavras explícitas.
+  String sanitizeNsfwQuery(String query) {
+    final replacements = {
+      // PT-BR
+      'sexo': 's3xo',
+      'sex': 's3x',
+      'sexy': 's3xy',
+      'pau': 'p4u',
+      'duro': 'dur0',
+      'cu ': 'c* ',
+      'puta': 'put4',
+      'foda': 'f0da',
+      'foder': 'f0der',
+      'buceta': 'buc3ta',
+      'piroca': 'pir0ca',
+      'caralho': 'car4lho',
+      'porra': 'p0rra',
+      'gozar': 'g0zar',
+      'orgasmo': '0rgasmo',
+      'punheta': 'punh3ta',
+      'anal': '4nal',
+      'vagina': 'v4gina',
+      'penis': 'p3nis',
+      'pênis': 'p3nis',
+      'nude': 'nud3',
+      'nudes': 'nud3s',
+      'safada': 'saf4da',
+      'safado': 'saf4do',
+      'gostosa': 'gost0sa',
+      'tesão': 'tes4o',
+      'tesao': 'tes4o',
+      'putaria': 'put4ria',
+      // EN
+      'fuck': 'f*ck',
+      'pussy': 'pu$$y',
+      'dick': 'd!ck',
+      'cock': 'c0ck',
+      'porn': 'p0rn',
+      'cum': 'c*m',
+      'ass ': 'a** ',
+      'boob': 'b00b',
+      'tits': 't!ts',
+      'orgasm': '0rgasm',
+      'erotic': 'er0tic',
+      'horny': 'h0rny',
+      'naked': 'nak3d',
+      'slut': 'sl*t',
+      'whore': 'wh0re',
+    };
+    var result = query.toLowerCase();
+    var changed = false;
+    for (final entry in replacements.entries) {
+      if (result.contains(entry.key)) {
+        result = result.replaceAll(entry.key, entry.value);
+        changed = true;
+      }
+    }
+    return changed ? result : query; // retorna original se nada mudou
+  }
+
   /// Sanitiza o nome do arquivo para gravação em disco
   String sanitizeFilename(String filename) {
     return filename
@@ -250,8 +311,47 @@ class NativeDownloaderService {
       }
     }
 
+    // ═══════════════════════════════════════
+    // RETRY NSFW: Se 0 resultados, tenta com termos sanitizados
+    // YouTube SafeSearch filtra queries com palavras explícitas mesmo quando os vídeos existem
+    // ═══════════════════════════════════════
     if (candidates.isEmpty) {
-      _log('💀 NENHUM CANDIDATO VÁLIDO ENCONTRADO. ABORTANDO.');
+      _log('⚠ 0 candidatos nas queries normais. Tentando retry com sanitização NSFW...');
+      
+      final nsfwQueries = <String>{};
+      for (final q in queries) {
+        final sanitized = sanitizeNsfwQuery(q);
+        if (sanitized != q) { // só adiciona se a sanitização realmente mudou algo
+          nsfwQueries.add(sanitized);
+        }
+      }
+      
+      // Adiciona também busca só pelo artista + "audio" como último recurso
+      final artistOnlyQuery = '$cleanArtist $cleanTitle audio';
+      final sanitizedArtistQuery = sanitizeNsfwQuery(artistOnlyQuery);
+      if (!nsfwQueries.contains(sanitizedArtistQuery)) {
+        nsfwQueries.add(sanitizedArtistQuery);
+      }
+      
+      for (final q in nsfwQueries) {
+        _log('🔍 NSFW retry: "$q"');
+        final searchResults = await searchInnerTube(q);
+        if (searchResults.isNotEmpty) {
+          for (final item in searchResults) {
+            final diffSec = targetDurSec > 0 && item.durationSec > 0 ? (item.durationSec - targetDurSec).abs() : 0;
+            if (targetDurSec > 0 && item.durationSec > 0 && diffSec > 25) {
+              continue;
+            }
+            _log('  ✅ NSFW retry ACEITO "${item.title}" (${item.durationSec}s) [ID: ${item.id}]');
+            candidates.add(item);
+          }
+          if (candidates.isNotEmpty) break;
+        }
+      }
+    }
+
+    if (candidates.isEmpty) {
+      _log('💀 NENHUM CANDIDATO VÁLIDO ENCONTRADO (incluindo retry NSFW). ABORTANDO.');
       throw Exception('Nenhum vídeo completo encontrado no YouTube para "$cleanArtist - $cleanTitle"');
     }
 

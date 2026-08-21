@@ -27,8 +27,8 @@ android {
         applicationId = "com.example.localify"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0.0"
+        versionCode = 5
+        versionName = "2.0.1"
 
         ndk {
             abiFilters.clear()
