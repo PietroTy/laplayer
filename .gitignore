@@ -28,6 +28,11 @@ node_modules/
 mobile/build/
 mobile/.dart_tool/
 server/temp_downloads/
+server/slskd-bin/
+server/slskd-downloads/
+server/slskd-incomplete/
+server/slskd-shared/
+server/slskd-data/
 *.m4a
 *.webm
 *.ogg

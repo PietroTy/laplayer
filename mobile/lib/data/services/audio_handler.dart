@@ -329,6 +329,22 @@ class LaPlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     queue.add(currentQueue);
   }
 
+  /// Move um item da fila de oldIndex para newIndex sem interromper a reprodução nem baixar o volume.
+  Future<void> moveQueueItem(int oldIndex, int newIndex) async {
+    if (_playlist == null) return;
+    final currentQueue = List<MediaItem>.from(queue.value);
+    if (oldIndex < 0 || oldIndex >= currentQueue.length || newIndex < 0 || newIndex >= currentQueue.length) return;
+
+    try {
+      await _playlist!.move(oldIndex, newIndex);
+      final item = currentQueue.removeAt(oldIndex);
+      currentQueue.insert(newIndex, item);
+      queue.add(currentQueue);
+    } catch (e) {
+      print('[LaPlayerAudioHandler] Erro ao mover item na fila: $e');
+    }
+  }
+
   // ── Controles de Reprodução ────────────────────────────────────────────
 
   Future<void> _announceAndPlay(MediaItem item) async {

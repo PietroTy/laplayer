@@ -15,8 +15,8 @@ class StandaloneDownloader {
 
   final NativeDownloaderService _nativeService = NativeDownloaderService();
   final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 4), // Fast 4s timeout for server discovery
-    receiveTimeout: const Duration(seconds: 60),
+    connectTimeout: const Duration(seconds: 15), // 15s timeout for mobile connections
+    receiveTimeout: const Duration(seconds: 180), // 3 min receive timeout for server audio conversion
   ));
 
   /// URL de servidor backend que respondeu com sucesso recentemente
@@ -53,7 +53,7 @@ class StandaloneDownloader {
     final endpoint = '$cleanUrl/api/download';
 
     debugPrint('[StandaloneDownloader] Conectando ao backend server: $endpoint');
-    onProgress('Solicitando ao servidor ($artist - $title)...', 0.1);
+    onProgress('Solicitando ao servidor Vitals ($artist - $title)...', 0.1);
 
     try {
       final response = await _dio.post(
@@ -80,6 +80,8 @@ class StandaloneDownloader {
               'Baixando do servidor (${(received / (1024 * 1024)).toStringAsFixed(1)} / ${(total / (1024 * 1024)).toStringAsFixed(1)} MB)...',
               pct,
             );
+          } else {
+            onProgress('Processando e convertendo áudio no servidor...', 0.3);
           }
         },
       );
@@ -98,12 +100,12 @@ class StandaloneDownloader {
         }
       }
     } catch (e) {
-      debugPrint('[StandaloneDownloader] Servidor $endpoint indisponível: $e');
+      debugPrint('[StandaloneDownloader] Servidor $endpoint indisponível ou erro: $e');
     }
     return null;
   }
 
-  /// Baixa a faixa (tenta Servidor primeiro se configurado, depois fallback Nativo)
+  /// Baixa a faixa via servidor backend do Vitals (prioritário)
   Future<File?> downloadTrack({
     required String title,
     required String artist,
@@ -116,7 +118,7 @@ class StandaloneDownloader {
     String? year,
     int? trackNumber,
   }) async {
-    debugPrint('[StandaloneDownloader] Iniciando download: $artist - $title');
+    debugPrint('[StandaloneDownloader] Iniciando download do servidor: $artist - $title');
 
     try {
       onProgress("Preparando armazenamento local...", 0.05);
@@ -136,26 +138,22 @@ class StandaloneDownloader {
       final sanitizedFilename = _sanitizeFilename('$artist - $title.$formatStr');
       final targetPath = p.join(targetFolder.path, sanitizedFilename);
 
-      // ── OPÇÃO 1: SERVIDOR BACKEND (com cache de URL ativa) ─────────────────
+      // ── SERVIDOR BACKEND (Prioridade Absoluta) ─────────────────────────────
       final candidateServerUrls = <String>[];
-      if (_cachedWorkingServerUrl != null) {
+      const fixedProdUrl = 'https://laplayer-api.magiktarot.com.br';
+      candidateServerUrls.add(fixedProdUrl);
+
+      if (_cachedWorkingServerUrl != null && !candidateServerUrls.contains(_cachedWorkingServerUrl)) {
         candidateServerUrls.add(_cachedWorkingServerUrl!);
       }
       if (serverUrl.isNotEmpty && !candidateServerUrls.contains(serverUrl)) {
         candidateServerUrls.add(serverUrl);
       }
-      const fixedProdUrl = 'https://laplayer-api.magiktarot.com.br';
-      if (!candidateServerUrls.contains(fixedProdUrl)) {
-        candidateServerUrls.add(fixedProdUrl);
-      }
       if (!candidateServerUrls.contains('http://10.0.2.2:3004')) {
-        candidateServerUrls.add('http://10.0.2.2:3004'); // Android Emulator localhost
+        candidateServerUrls.add('http://10.0.2.2:3004'); // Emulador Android
       }
       if (!candidateServerUrls.contains('http://127.0.0.1:3004')) {
-        candidateServerUrls.add('http://127.0.0.1:3004'); // Local PC
-      }
-      if (!candidateServerUrls.contains('http://10.0.2.2:8000')) {
-        candidateServerUrls.add('http://10.0.2.2:8000');
+        candidateServerUrls.add('http://127.0.0.1:3004'); // PC Local
       }
 
       for (final sUrl in candidateServerUrls) {
@@ -174,13 +172,13 @@ class StandaloneDownloader {
         );
 
         if (serverFile != null && serverFile.existsSync()) {
-          _cachedWorkingServerUrl = sUrl; // Salva URL funcional para as próximas músicas
+          _cachedWorkingServerUrl = sUrl;
           return serverFile;
         }
       }
 
-      // ── OPÇÃO 2: DOWNLOAD NATIVO (FALLBACK) ─────────────────────────────────
-      debugPrint('[StandaloneDownloader] Recorrendo ao download nativo puro em Dart...');
+      // ── DOWNLOAD NATIVO (Apenas se o servidor estiver completamente offline) ────────────────
+      debugPrint('[StandaloneDownloader] Servidor indisponível. Recorrendo ao engine nativo...');
       AudioQualityPreset qualityPreset;
       switch (qualityStr.toLowerCase()) {
         case 'normal':
@@ -212,7 +210,7 @@ class StandaloneDownloader {
       );
 
       if (downloadedFile == null || !downloadedFile.existsSync()) {
-        throw Exception("Falha ao salvar o arquivo baixado no armazenamento.");
+        throw Exception("Falha ao salvar o arquivo baixado.");
       }
 
       onProgress("Concluído!", 1.0);

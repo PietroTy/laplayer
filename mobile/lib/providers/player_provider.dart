@@ -420,13 +420,7 @@ class PlayerNotifier extends StateNotifier<app.PlayerState> {
     }
 
     state = state.copyWith(queue: list, currentIndex: newCurrentIndex);
-
-    // Recarrega a fila atomicamente preservando a posição
-    final sync = _ref.read(syncProvider.notifier);
-    final playlistId = list.isNotEmpty ? list.first.playlistId : '';
-    final localPathsMap = await sync.findLocalPathsBulk(list);
-    final items = _buildMediaItemsFromMap(list, localPathsMap);
-    await _audio.reloadQueue(items, newCurrentIndex);
+    await _audio.moveQueueItem(oldIndex, newIndex);
   }
 
   // ── Controles Básicos ──────────────────────────────────────────────────

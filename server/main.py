@@ -7,6 +7,7 @@ import http.cookiejar
 import random
 import threading
 import json
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Query, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ from typing import Optional
 import yt_dlp
 import requests
 from mutagen.mp4 import MP4, MP4Cover
+from soulseek_client import get_soulseek_client
 
 # ---------------------------------------------------------------------------
 # Cookie configuration – helps bypass YouTube bot-detection.
@@ -152,11 +154,6 @@ def log_key_download(key: str, artist: str, title: str):
         except Exception as e:
             print(f"[Backend] Erro ao gravar log de downloads em texto: {e}")
 
-app = FastAPI(
-    title="Localify Backend Server",
-    dependencies=[Depends(verify_access_key)]
-)
-
 # ── Ghost Watcher (Simulador de navegação humana para aquecer cookies) ──
 _GHOST_VIDEOS = [
     "jfKfPfyJRdk",  # Lofi Girl
@@ -197,13 +194,58 @@ def trigger_ghost_watch_async():
     # Roda em thread separada daemon para não travar a inicialização ou requisições
     threading.Thread(target=simulate_ghost_watch, daemon=True).start()
 
-@app.on_event("startup")
-async def startup_event():
+# ── Lifespan (substitui @app.on_event deprecado) ──────────────────────────
+@asynccontextmanager
+async def lifespan(app):
     print("[Backend] Iniciando Ghost Watcher na inicialização do servidor...")
     trigger_ghost_watch_async()
+    # Verifica se o slskd está disponível
+    slsk = get_soulseek_client()
+    if slsk.is_available():
+        print("[Backend] ✅ Soulseek (slskd) disponível como fonte de fallback")
+    else:
+        print("[Backend] ⚠ Soulseek (slskd) não disponível — apenas YouTube será usado")
+    yield
+
+app = FastAPI(
+    title="Localify Backend Server",
+    dependencies=[Depends(verify_access_key)],
+    lifespan=lifespan,
+)
 
 TEMP_DIR = "temp_downloads"
 os.makedirs(TEMP_DIR, exist_ok=True)
+
+# ── Rate-limit tracking ────────────────────────────────────────────────────
+# Tracks when YouTube rate-limiting was last detected so we can skip YouTube
+# entirely for a cooldown period and go straight to Soulseek.
+_yt_rate_limit_until: float = 0.0
+_yt_rate_limit_lock = threading.Lock()
+_YT_RATE_LIMIT_COOLDOWN = 300  # 5 minutos de cooldown após rate-limit
+
+def _mark_yt_rate_limited():
+    """Mark YouTube as rate-limited for the cooldown period."""
+    global _yt_rate_limit_until
+    with _yt_rate_limit_lock:
+        _yt_rate_limit_until = time.time() + _YT_RATE_LIMIT_COOLDOWN
+        print(f"[Backend] ⚠ YouTube rate-limited! Pulando para Soulseek pelos próximos {_YT_RATE_LIMIT_COOLDOWN}s")
+
+def _is_yt_rate_limited() -> bool:
+    """Check if YouTube is currently in cooldown from rate-limiting."""
+    with _yt_rate_limit_lock:
+        return time.time() < _yt_rate_limit_until
+
+def _is_rate_limit_error(error_msg: str) -> bool:
+    """Detect if an error message indicates YouTube rate-limiting."""
+    rate_limit_indicators = [
+        "rate-limited",
+        "rate limit",
+        "try again later",
+        "This content isn't available",
+        "HTTP Error 429",
+    ]
+    error_lower = str(error_msg).lower()
+    return any(indicator.lower() in error_lower for indicator in rate_limit_indicators)
 
 # Formatos suportados e suas configurações de yt-dlp
 _AUDIO_FORMATS = {
@@ -330,7 +372,8 @@ async def download_track(
     x_access_key: Optional[str] = Header(None, alias="X-Access-Key"),
     key: Optional[str] = Query(None)
 ):
-    provided_key = (x_access_key or key or "UNKNOWN-KEY").strip()
+    raw_key = x_access_key if isinstance(x_access_key, str) else (key if isinstance(key, str) else "UNKNOWN-KEY")
+    provided_key = raw_key.strip()
     # Gerar ID único para o arquivo temporário
     timestamp = int(time.time() * 1000)
     base_filename = f"track_{timestamp}"
@@ -361,7 +404,7 @@ async def download_track(
         pp = {
             'key': 'FFmpegExtractAudio',
             'preferredcodec': preferred_codec,
-            'preferredquality': '0', # 0 = mantém o bitrate original intacto sem re-encoding lento
+            'preferredquality': audio_quality_val, # respeita a qualidade configurada no app (64, 128, 192, ou 0=best)
         }
         postprocessors.append(pp)
         # Embute metadados
@@ -415,13 +458,36 @@ async def download_track(
 
     # Limpar string de busca base para evitar parênteses longos e pontuações estranhas
     clean_base = clean_query_string(request.artist, request.title)
+    raw_query = f"{request.artist} {request.title}"
 
-    # Lista de buscas otimizada (apenas 2 tentativas no máximo: busca limpa e original)
-    # YouTube já retorna os canais Topic e Áudios Oficiais no topo ao buscar "Artista Título"
-    queries = [
+    # Query sem termos restritos/bloqueados do YouTube (ex: 'sex', 'ex', 'explicit')
+    # que causam 0 resultados na busca do yt-dlp/YouTube API
+    unrestricted_query = re.sub(r'\b(sex|ex|explicit|nsfw|nude|porn)\b', '', raw_query, flags=re.IGNORECASE)
+    unrestricted_query = re.sub(r'[\'\"’]', '', unrestricted_query)
+    unrestricted_query = re.sub(r'\s+', ' ', unrestricted_query).strip()
+
+    # Query somente com artista + título sem termos em parênteses
+    title_clean = re.sub(r'[\(\[][^\)\]]*[\)\]]', '', request.title).strip()
+    title_only_query = f"{request.artist} {title_clean}".strip()
+
+    candidate_queries = [
         clean_base,
-        f"{request.artist} {request.title}"
+        f"{request.artist} {request.title} official audio",
+        f"{request.artist} {request.title} audio",
+        raw_query,
+        unrestricted_query,
+        title_only_query,
+        request.title
     ]
+
+    # Remove duplicatas mantendo a ordem
+    queries = []
+    seen_q = set()
+    for q in candidate_queries:
+        norm = q.lower().strip()
+        if norm and norm not in seen_q:
+            seen_q.add(norm)
+            queries.append(q)
 
     downloaded_file = None
 
@@ -456,7 +522,13 @@ async def download_track(
             queries.insert(0, topic_query)
 
     # ── Fluxo normal: busca por queries ──────────────────────────────────────
-    if not downloaded_file:
+    # Se o YouTube estiver rate-limited, pula direto pro Soulseek
+    yt_skipped = False
+    if not downloaded_file and _is_yt_rate_limited():
+        print(f"[Backend] YouTube em cooldown por rate-limit. Pulando direto para Soulseek.")
+        yt_skipped = True
+
+    if not downloaded_file and not yt_skipped:
         for attempt_idx, query in enumerate(queries):
             print(f"[Backend] Tentando busca rápida ({attempt_idx + 1}/{len(queries)}): {query}")
             
@@ -612,23 +684,69 @@ async def download_track(
                             downloaded_file = found
                             break
                 except Exception as e:
-                    print(f"[Backend] Falha ao baixar {video_url}: {e}")
+                    error_str = str(e)
+                    print(f"[Backend] Falha ao baixar {video_url}: {error_str}")
+                    # Detecta rate-limit e marca para pular pro Soulseek
+                    if _is_rate_limit_error(error_str):
+                        _mark_yt_rate_limited()
+                        # Limpa e sai do loop de YouTube imediatamente
+                        for ext_clean in [final_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'part', 'ytdl']:
+                            residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext_clean}")
+                            if os.path.exists(residual):
+                                try: os.remove(residual)
+                                except: pass
+                        break  # Sai do loop de entries (vai pro Soulseek)
                     # Limpa arquivos parciais/resíduos para evitar erros nas próximas tentativas
-                    for ext in [final_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'part', 'ytdl']:
-                        residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext}")
+                    for ext_clean in [final_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'part', 'ytdl']:
+                        residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext_clean}")
                         if os.path.exists(residual):
                             try: os.remove(residual)
                             except: pass
+                    # Pequeno delay entre tentativas para evitar rate-limit
+                    time.sleep(1.0)
                     continue
             
             if downloaded_file:
                 break
+            # Se foi rate-limited, sai do loop de queries também
+            if _is_yt_rate_limited():
+                break
 
 
-    # Se todas as queries e vídeos falharem, levantamos erro
+    # ── Fallback Soulseek: tenta buscar no Soulseek se YouTube falhou ──────
+    if not downloaded_file or not os.path.exists(downloaded_file):
+        print(f"[Backend] YouTube falhou para '{request.artist} - {request.title}'. Tentando Soulseek...")
+        try:
+            slsk = get_soulseek_client()
+            if slsk.is_available():
+                outtmpl_base = os.path.join(TEMP_DIR, base_filename)
+                slsk_result = slsk.search_and_download(
+                    artist=request.artist,
+                    title=request.title,
+                    target_path=f"{outtmpl_base}.{final_ext}",
+                    search_timeout=30,
+                    download_timeout=120,
+                )
+                if slsk_result and os.path.exists(slsk_result):
+                    downloaded_file = slsk_result
+                    # Atualiza a extensão final se o Soulseek baixou em formato diferente
+                    actual_ext = os.path.splitext(slsk_result)[1].lstrip('.')
+                    if actual_ext and actual_ext != final_ext:
+                        final_ext = actual_ext
+                    print(f"[Backend] ✅ Download via Soulseek concluído: {slsk_result}")
+            else:
+                print("[Backend] Soulseek não disponível para fallback")
+        except Exception as e:
+            print(f"[Backend] Erro no fallback Soulseek: {e}")
+
+    # Se YouTube e Soulseek falharem, levantamos 404 Not Found
     if not downloaded_file or not os.path.exists(downloaded_file):
         if cover_path: cleanup_file(cover_path)
-        raise HTTPException(status_code=500, detail="Não foi possível baixar nenhuma versão desta música após várias tentativas e termos de busca.")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Nenhuma versão da música '{request.artist} - {request.title}' foi encontrada no YouTube nem no Soulseek após várias tentativas."
+        )
+
 
     # Embutir ID3 Tags (Artista, Titulo, Album, Imagem) usando mutagen
     # Apenas para m4a — outros formatos têm metadados embutidos pelo FFmpegMetadata
@@ -684,7 +802,31 @@ _spotify_token_cache: Optional[str] = None
 _spotify_token_time: float = 0
 
 def fetch_fresh_spotify_token() -> Optional[str]:
-    """Obtém um access_token anônimo rotacionando múltiplas fontes."""
+    """Obtém um access_token do Spotify (Client Credentials oficial ou fallback)."""
+    client_id = os.getenv("SPOTIFY_CLIENT_ID")
+    client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+
+    # 1. Fluxo Oficial: Client Credentials se SPOTIFY_CLIENT_ID e SPOTIFY_CLIENT_SECRET existirem no .env
+    if client_id and client_secret:
+        try:
+            resp = requests.post(
+                "https://accounts.spotify.com/api/token",
+                data={"grant_type": "client_credentials"},
+                auth=(client_id.strip(), client_secret.strip()),
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                token = data.get("access_token")
+                if token:
+                    print("[Backend] ✅ Token do Spotify obtido com sucesso via Client Credentials API!")
+                    return token
+            else:
+                print(f"[Backend] ⚠ Erro ao obter token do Spotify via API oficial: HTTP {resp.status_code}")
+        except Exception as e:
+            print(f"[Backend] Exceção ao solicitar token do Spotify: {e}")
+
+    # 2. Tenta método de web scrape em embed pages (legado)
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -695,7 +837,6 @@ def fetch_fresh_spotify_token() -> Optional[str]:
     urls = [
         "https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M",
         "https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT",
-        "https://open.spotify.com/embed/playlist/37i9dQZF1DX0Xbv3uHJ12g",
     ]
     
     for url in urls:
@@ -792,17 +933,30 @@ async def spotify_search_proxy(q: str, limit: int = 20):
         for entry in entries:
             if not entry: continue
             vid_id = entry.get("id") or ""
-            title = entry.get("title") or ""
-            uploader = entry.get("uploader") or entry.get("channel") or "Artista Desconhecido"
+            raw_title = entry.get("title") or ""
+            uploader = entry.get("uploader") or entry.get("channel") or ""
             duration = int((entry.get("duration") or 0) * 1000)
+            
+            # Limpa uploader
+            clean_artist = re.sub(r'\s*-\s*Topic$', '', uploader, flags=re.IGNORECASE).strip()
+            # Limpa sufixos de vídeo do título: (Official Video), (Lyric Video), etc.
+            clean_title = re.sub(r'[\(\[][^\)\]]*(official|video|lyric|audio|hd|4k)[^\)\]]*[\)\]]', '', raw_title, flags=re.IGNORECASE).strip()
+            
+            track_name = clean_title
+            artist_name = clean_artist or "Artista Desconhecido"
+            
+            if " - " in clean_title:
+                parts = clean_title.split(" - ", 1)
+                artist_name = parts[0].strip()
+                track_name = parts[1].strip()
             
             thumbnails = entry.get("thumbnails") or []
             thumb_url = thumbnails[-1].get("url") if thumbnails else ""
             
             spotify_items.append({
                 "id": f"yt_{vid_id}",
-                "name": title,
-                "artists": [{"name": uploader}],
+                "name": track_name,
+                "artists": [{"name": artist_name}],
                 "album": {"name": "Single", "images": [{"url": thumb_url}] if thumb_url else []},
                 "duration_ms": duration,
             })

@@ -79,11 +79,9 @@ class SpotifyService {
         _tokenExpirationMs = now + (3000 * 1000);
         return _cachedAccessToken;
       }
-
-      throw 'Token anônimo não encontrado no HTML';
+      return null;
     } catch (e) {
-      if (e is SocketException) throw 'Falha de conexão com Spotify.';
-      throw '$e';
+      return null;
     }
   }
 
@@ -189,8 +187,65 @@ class SpotifyService {
     Function(List<Track>)? onTracksFetched,
   }) async {
     final cleanId = parsePlaylistId(playlistId) ?? playlistId.trim().split('?')[0].replaceAll('/', '');
-    final token = await _getToken(cleanId);
+    // Método 1: Extração rápida via Embed HTML (100% público, sem token, instantâneo)
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 10);
+      final embedUrl = 'https://open.spotify.com/embed/playlist/$cleanId';
+      final request = await client.getUrl(Uri.parse(embedUrl));
+      request.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
+      
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final html = await response.transform(utf8.decoder).join();
+        final match = RegExp(r'<script id="__NEXT_DATA__" type="application/json">([^<]+)</script>').firstMatch(html);
+        if (match != null && match.group(1) != null) {
+          final data = jsonDecode(match.group(1)!);
+          final entity = data['props']?['pageProps']?['state']?['data']?['entity'];
+          final trackList = entity?['trackList'] as List? ?? [];
 
+          if (trackList.isNotEmpty) {
+            List<Track> embedTracks = [];
+            int pos = 0;
+            for (final item in trackList) {
+              final uri = (item['uri'] as String?) ?? '';
+              final tId = uri.split(':').last;
+              final title = (item['title'] as String?) ?? '';
+              if (tId.isEmpty || title.isEmpty) continue;
+
+              final artist = (item['subtitle'] as String?) ?? 'Artista Desconhecido';
+              final durationMs = (item['duration'] as int?) ?? 0;
+              final explicit = (item['isExplicit'] as bool?) ?? false;
+
+              embedTracks.add(Track(
+                id: tId,
+                spotifyUri: uri.isNotEmpty ? uri : 'spotify:track:$tId',
+                playlistPosition: pos++,
+                title: title,
+                artist: artist,
+                primaryArtist: artist.split(',').first.trim(),
+                durationMs: durationMs,
+                explicit: explicit,
+                playlistId: cleanId,
+                spotifyUrl: 'https://open.spotify.com/track/$tId',
+              ));
+            }
+
+            if (embedTracks.isNotEmpty) {
+              debugPrint('[SpotifyService] Sucesso Embed HTML: ${embedTracks.length} faixas extraídas com sucesso!');
+              if (onTracksFetched != null) onTracksFetched(embedTracks);
+              if (onProgress != null) onProgress(embedTracks.length);
+              return embedTracks;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[SpotifyService] Aviso no método Embed HTML: $e. Tentando paginação GQL...');
+    }
+
+    // Método 2: Paginação GQL (para playlists gigantes que necessitam de paginação de 100+ itens)
+    final token = await _getToken(cleanId);
     if (token != null) {
       try {
         debugPrint('[SpotifyService] Iniciando extração GQL para a playlist $cleanId...');
@@ -225,14 +280,11 @@ class SpotifyService {
 
           final request = await client.getUrl(queryUri);
           request.headers.set('Authorization', 'Bearer $token');
-          request.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+          request.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
           request.headers.set('App-Platform', 'WebPlayer');
 
           final response = await request.close();
-          if (response.statusCode != 200) {
-            debugPrint('[SpotifyService] GQL retornou status ${response.statusCode} no offset $offset');
-            break;
-          }
+          if (response.statusCode != 200) break;
 
           final responseBody = await response.transform(utf8.decoder).join();
           final gdata = jsonDecode(responseBody);
@@ -294,75 +346,14 @@ class SpotifyService {
             if (onProgress != null) onProgress(allGqlTracks.length);
 
             offset += 100;
-            if (items.length < 100) {
-              hasMore = false;
-            }
+            if (items.length < 100) hasMore = false;
           }
         }
 
-        if (allGqlTracks.isNotEmpty) {
-          debugPrint('[SpotifyService] Sucesso GQL: ${allGqlTracks.length} faixas extraídas com sucesso!');
-          return allGqlTracks;
-        }
+        if (allGqlTracks.isNotEmpty) return allGqlTracks;
       } catch (gqlErr) {
-        debugPrint('[SpotifyService] Erro durante paginação GQL: $gqlErr. Recorrendo a fallbacks...');
+        debugPrint('[SpotifyService] Erro na extração GQL: $gqlErr');
       }
-    }
-
-    // Método 2: Fallback via Embed HTML (caso GQL falhe)
-    try {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 10);
-      final embedUrl = 'https://open.spotify.com/embed/playlist/$cleanId';
-      final request = await client.getUrl(Uri.parse(embedUrl));
-      request.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-      
-      final response = await request.close();
-      if (response.statusCode == 200) {
-        final html = await response.transform(utf8.decoder).join();
-        final match = RegExp(r'<script id="__NEXT_DATA__" type="application/json">([^<]+)</script>').firstMatch(html);
-        if (match != null && match.group(1) != null) {
-          final data = jsonDecode(match.group(1)!);
-          final entity = data['props']?['pageProps']?['state']?['data']?['entity'];
-          final trackList = entity?['trackList'] as List? ?? [];
-
-          if (trackList.isNotEmpty) {
-            List<Track> embedTracks = [];
-            int pos = 0;
-            for (final item in trackList) {
-              final uri = (item['uri'] as String?) ?? '';
-              final tId = uri.split(':').last;
-              final title = (item['title'] as String?) ?? '';
-              if (tId.isEmpty || title.isEmpty) continue;
-
-              final artist = (item['subtitle'] as String?) ?? 'Artista Desconhecido';
-              final durationMs = (item['duration'] as int?) ?? 0;
-              final explicit = (item['isExplicit'] as bool?) ?? false;
-
-              embedTracks.add(Track(
-                id: tId,
-                spotifyUri: uri.isNotEmpty ? uri : 'spotify:track:$tId',
-                playlistPosition: pos++,
-                title: title,
-                artist: artist,
-                primaryArtist: artist.split(',').first.trim(),
-                durationMs: durationMs,
-                explicit: explicit,
-                playlistId: cleanId,
-                spotifyUrl: 'https://open.spotify.com/track/$tId',
-              ));
-            }
-
-            if (embedTracks.isNotEmpty) {
-              if (onTracksFetched != null) onTracksFetched(embedTracks);
-              if (onProgress != null) onProgress(embedTracks.length);
-              return embedTracks;
-            }
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('[SpotifyService] Erro no fallback Embed HTML: $e');
     }
 
     return [];
