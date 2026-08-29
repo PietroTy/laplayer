@@ -155,7 +155,7 @@ class PlayerNotifier extends StateNotifier<app.PlayerState> {
 
       final currentTrack = state.currentTrack;
       if (currentTrack != null) {
-        print('[PlayerNotifier] Tratando faixa corrompida: ${currentTrack.title}');
+        print('[PlayerNotifier] Tratando faixa corrompida ou não encontrada: ${currentTrack.title}');
         
         // 1. Tenta apagar o arquivo físico local
         try {
@@ -182,6 +182,14 @@ class PlayerNotifier extends StateNotifier<app.PlayerState> {
           _ref.invalidate(playlistTracksProvider(currentTrack.playlistId));
         } catch (e) {
           print('[PlayerNotifier] Erro ao atualizar banco para faixa corrompida: $e');
+        }
+
+        // 4. Se houver mais faixas na fila, avança automaticamente para a próxima faixa!
+        if (state.queue.length > 1) {
+          print('[PlayerNotifier] Avançando automaticamente para a próxima faixa em 1.5s...');
+          Future.delayed(const Duration(milliseconds: 1500), () {
+            next();
+          });
         }
       }
     });
