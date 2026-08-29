@@ -236,13 +236,17 @@ def _is_yt_rate_limited() -> bool:
         return time.time() < _yt_rate_limit_until
 
 def _is_rate_limit_error(error_msg: str) -> bool:
-    """Detect if an error message indicates YouTube rate-limiting."""
+    """Detect if an error message indicates YouTube rate-limiting or bot detection."""
     rate_limit_indicators = [
         "rate-limited",
         "rate limit",
         "try again later",
         "This content isn't available",
         "HTTP Error 429",
+        "Sign in to confirm",
+        "confirm you're not a bot",
+        "confirm you’re not a bot",
+        "bot",
     ]
     error_lower = str(error_msg).lower()
     return any(indicator.lower() in error_lower for indicator in rate_limit_indicators)
