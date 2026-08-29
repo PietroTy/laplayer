@@ -6,6 +6,8 @@ import re
 import http.cookiejar
 import random
 import threading
+import concurrent.futures
+import subprocess
 import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Query, Depends
@@ -447,8 +449,8 @@ async def download_track(
         expected = f"{base}.{expected_ext}"
         if os.path.exists(expected) and os.path.getsize(expected) > 1024:
             return expected
-        # Busca qualquer arquivo com o base_filename e uma extensão de áudio
-        for ext in [expected_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg']:
+        # Busca qualquer arquivo com o base_filename e uma extensão de áudio/vídeo
+        for ext in [expected_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'mp4', 'mkv', 'aac']:
             candidate = f"{base}.{ext}"
             if os.path.exists(candidate) and os.path.getsize(candidate) > 1024:
                 # Renomeia para a extensão final correta se necessário
@@ -694,36 +696,87 @@ async def download_track(
                 outtmpl_base = os.path.join(TEMP_DIR, base_filename)
                 ydl_opts = _build_ydl_opts(f"{outtmpl_base}.%(ext)s")
                     
+                # ── Download via subprocesso com timeout REAL (SIGKILL) ──
+                _DL_TIMEOUT = 30  # segundos máximo por vídeo
+                outtmpl_arg = f"{outtmpl_base}.%(ext)s"
+                cmd = [
+                    "yt-dlp",
+                    "--no-playlist",
+                    "--no-check-certificates",
+                    "--geo-bypass",
+                    "--quiet", "--no-warnings",
+                    "--socket-timeout", "10",
+                    "--retries", "2",
+                    "--fragment-retries", "2",
+                    "--http-chunk-size", "1M",
+                    "--extractor-args", "youtube:player_client=android,web",
+                    "-x", "--audio-format", preferred_codec,
+                    "--audio-quality", audio_quality_val,
+                    "--embed-metadata",
+                    "-o", outtmpl_arg,
+                    video_url,
+                ]
+                # Adiciona cookies se existirem
+                cookie_file = _COOKIE_OPTS.get("cookiefile")
+                if cookie_file and os.path.isfile(cookie_file):
+                    cmd.insert(1, "--cookies")
+                    cmd.insert(2, cookie_file)
+
                 try:
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        ydl.extract_info(video_url, download=True)
-                        found = _find_downloaded_file(outtmpl_base, final_ext)
-                        if found:
+                    result = subprocess.run(
+                        cmd,
+                        cwd=os.path.dirname(os.path.abspath(__file__)),
+                        capture_output=True, text=True,
+                        timeout=_DL_TIMEOUT,
+                    )
+                    # Verifica se o arquivo foi baixado (ffprobe warnings causam exit code != 0 mas o arquivo existe)
+                    found = _find_downloaded_file(outtmpl_base, final_ext)
+                    if found:
+                        fsize = os.path.getsize(found)
+                        if fsize > 10000:  # > 10KB = arquivo válido
                             print(f"[Backend] Sucesso! Baixado: {video_url} -> {found}")
                             downloaded_file = found
                             break
-                except Exception as e:
-                    error_str = str(e)
-                    print(f"[Backend] Falha ao baixar {video_url}: {error_str}")
-                    # Detecta rate-limit e marca para pular pro Soulseek
-                    if _is_rate_limit_error(error_str):
+                        else:
+                            print(f"[Backend] Arquivo muito pequeno ({fsize}B), descartando: {found}")
+                            os.remove(found)
+                    # Sem arquivo: trata como erro
+                    if result.returncode != 0:
+                        error_str = result.stderr or result.stdout or f"exit code {result.returncode}"
+                        print(f"[Backend] Falha ao baixar {video_url}: {error_str[:300]}")
+                        if _is_rate_limit_error(error_str):
+                            _mark_yt_rate_limited()
+                            for ext_clean in [final_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'mp4', 'part', 'ytdl']:
+                                residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext_clean}")
+                                if os.path.exists(residual):
+                                    try: os.remove(residual)
+                                    except: pass
+                            break
+                except subprocess.TimeoutExpired:
+                    print(f"[Backend] ⏰ TIMEOUT ({_DL_TIMEOUT}s)! Download travou em {video_url} — pulando")
+                    # Após 2 timeouts seguidos, marca como rate-limited e pula pro Soulseek
+                    if entry_idx >= 1:
                         _mark_yt_rate_limited()
-                        # Limpa e sai do loop de YouTube imediatamente
-                        for ext_clean in [final_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'part', 'ytdl']:
+                        for ext_clean in [final_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'mp4', 'part', 'ytdl']:
                             residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext_clean}")
                             if os.path.exists(residual):
                                 try: os.remove(residual)
                                 except: pass
-                        break  # Sai do loop de entries (vai pro Soulseek)
-                    # Limpa arquivos parciais/resíduos para evitar erros nas próximas tentativas
-                    for ext_clean in [final_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'part', 'ytdl']:
-                        residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext_clean}")
-                        if os.path.exists(residual):
-                            try: os.remove(residual)
-                            except: pass
-                    # Pequeno delay entre tentativas para evitar rate-limit
-                    time.sleep(1.0)
-                    continue
+                        break
+                except Exception as e:
+                    error_str = str(e)
+                    print(f"[Backend] Falha ao baixar {video_url}: {error_str}")
+                    if _is_rate_limit_error(error_str):
+                        _mark_yt_rate_limited()
+                        break
+                # Limpa arquivos parciais entre tentativas
+                for ext_clean in [final_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'mp4', 'part', 'ytdl']:
+                    residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext_clean}")
+                    if os.path.exists(residual):
+                        try: os.remove(residual)
+                        except: pass
+                time.sleep(0.5)
+                continue
             
             if downloaded_file:
                 break
