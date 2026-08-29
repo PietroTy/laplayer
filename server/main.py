@@ -246,16 +246,22 @@ def _is_yt_rate_limited() -> bool:
 
 def _is_rate_limit_error(error_msg: str) -> bool:
     """Detect if an error message indicates YouTube rate-limiting or bot detection."""
+    error_lower = str(error_msg).lower()
+
+    # Restrição de idade NÃO é bloqueio de bot/rate-limit global
+    if "confirm your age" in error_lower or "age-restricted" in error_lower:
+        return False
+
     rate_limit_indicators = [
         "rate-limited",
         "rate limit",
         "try again later",
         "This content isn't available",
         "HTTP Error 429",
-        "Sign in to confirm",
         "confirm you're not a bot",
         "confirm you’re not a bot",
-        "bot",
+        "bot detection",
+        "solve a captcha",
         "timeout",
         "timed out",
         "read timeout",
@@ -265,7 +271,6 @@ def _is_rate_limit_error(error_msg: str) -> bool:
         "network is unreachable",
         "throttled",
     ]
-    error_lower = str(error_msg).lower()
     return any(indicator.lower() in error_lower for indicator in rate_limit_indicators)
 
 # Formatos suportados e suas configurações de yt-dlp
