@@ -18,7 +18,7 @@ from typing import Optional, List, Dict, Tuple
 
 # ── Configuration ────────────────────────────────────────────────────────────
 SLSKD_HOST = os.getenv("SLSKD_HOST", "http://127.0.0.1:5030")
-SLSKD_API_KEY = os.getenv("SLSKD_API_KEY", "")
+SLSKD_API_KEY = os.getenv("SLSKD_API_KEY") or os.getenv("SLSKD_KEY") or "laplayer-slskd-api-key-2026"
 SLSKD_URL_BASE = "/api/v0"
 
 # Audio extensions ranked by quality preference (higher index = better)
@@ -41,26 +41,58 @@ _VALID_AUDIO_EXTS = set(_AUDIO_QUALITY_RANK.keys())
 class SoulseekDownloader:
     """Manages search and download operations against a local slskd instance."""
 
-    def __init__(self, host: str = SLSKD_HOST, api_key: str = SLSKD_API_KEY):
-        self.host = host.rstrip("/")
-        self.api_key = api_key
+    def __init__(self, host: str = None, api_key: str = None):
+        h = host or os.getenv("SLSKD_HOST", "http://127.0.0.1:5030")
+        self.host = h.rstrip("/")
+        self.api_key = api_key or os.getenv("SLSKD_API_KEY") or os.getenv("SLSKD_KEY") or "laplayer-slskd-api-key-2026"
         self.base = f"{self.host}{SLSKD_URL_BASE}"
         self._session = requests.Session()
-        self._session.headers.update({
-            "X-API-Key": self.api_key,
+        self._lock = threading.Lock()
+
+    def _headers(self) -> dict:
+        key = self.api_key or os.getenv("SLSKD_API_KEY") or os.getenv("SLSKD_KEY") or "laplayer-slskd-api-key-2026"
+        return {
+            "X-API-Key": key,
             "Content-Type": "application/json",
             "Accept": "application/json",
-        })
-        self._lock = threading.Lock()
+        }
 
     # ── Health ─────────────────────────────────────────────────────────────
     def is_available(self) -> bool:
         """Check whether the slskd instance is reachable and authenticated."""
         try:
-            r = self._session.get(f"{self.base}/application", timeout=3)
-            return r.status_code == 200
+            r = self._session.get(f"{self.base}/application", headers=self._headers(), timeout=3)
+            if r.status_code == 200:
+                return True
         except Exception:
-            return False
+            pass
+
+        # Se não estiver rodando na porta 5030, tenta auto-iniciar slskd local se o binário existir
+        slskd_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "slskd-bin")
+        if os.path.isdir(slskd_bin):
+            try:
+                print("[Soulseek] Daemon slskd não detectado na porta 5030 — iniciando automaticamente...")
+                import subprocess
+                subprocess.Popen(
+                    ["./slskd", "--app-dir", "./data"],
+                    cwd=slskd_bin,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                for _ in range(12):  # Poll por até 6s (12 x 0.5s)
+                    time.sleep(0.5)
+                    try:
+                        r = self._session.get(f"{self.base}/application", headers=self._headers(), timeout=1.5)
+                        if r.status_code == 200:
+                            print("[Soulseek] ✅ Daemon slskd iniciado com sucesso na porta 5030!")
+                            return True
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[Soulseek] Erro ao auto-iniciar slskd: {e}")
+
+        return False
 
     # ── Search ─────────────────────────────────────────────────────────────
     def search(
@@ -92,6 +124,7 @@ class SoulseekDownloader:
             r = self._session.post(
                 f"{self.base}/searches",
                 json={"searchText": query},
+                headers=self._headers(),
                 timeout=10,
             )
             if r.status_code not in (200, 201):
@@ -111,7 +144,7 @@ class SoulseekDownloader:
         deadline = start_time + timeout
         while time.time() < deadline:
             try:
-                r = self._session.get(f"{self.base}/searches/{search_id}", timeout=5)
+                r = self._session.get(f"{self.base}/searches/{search_id}", headers=self._headers(), timeout=5)
                 if r.status_code == 200:
                     data = r.json()
                     state = str(data.get("state", ""))
@@ -131,6 +164,7 @@ class SoulseekDownloader:
         try:
             r = self._session.get(
                 f"{self.base}/searches/{search_id}/responses",
+                headers=self._headers(),
                 timeout=10,
             )
             if r.status_code != 200:
@@ -181,6 +215,7 @@ class SoulseekDownloader:
                     "filename": filename,
                     "size": size,
                 }],
+                headers=self._headers(),
                 timeout=10,
             )
             if r.status_code not in (200, 201, 204):
@@ -197,6 +232,7 @@ class SoulseekDownloader:
             try:
                 r = self._session.get(
                     f"{self.base}/transfers/downloads/{username}",
+                    headers=self._headers(),
                     timeout=10,
                 )
                 if r.status_code == 200:
@@ -279,7 +315,7 @@ class SoulseekDownloader:
     def _delete_search(self, search_id: str):
         """Delete a search to clean up resources."""
         try:
-            self._session.delete(f"{self.base}/searches/{search_id}", timeout=5)
+            self._session.delete(f"{self.base}/searches/{search_id}", headers=self._headers(), timeout=5)
         except Exception:
             pass
 
