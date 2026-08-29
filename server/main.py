@@ -66,7 +66,7 @@ if not _NODE_PATH:
     _NODE_PATH = "node"
 
 def _get_base_opts() -> dict:
-    """Common yt-dlp options shared across all calls (cookies + JS runtime)."""
+    """Common yt-dlp options shared across all calls (cookies + JS runtime + timeout protection)."""
     opts = {**_COOKIE_OPTS}
     if _NODE_PATH:
         opts["js_runtimes"] = {"node": {"path": _NODE_PATH}}
@@ -74,6 +74,13 @@ def _get_base_opts() -> dict:
     # Enable the remote component challenge solver script needed for YouTube JS challenge solving
     opts["remote_components"] = "ejs:github"
     opts["extractor_args"] = {"youtube": {"player_client": ["android", "web"]}}
+
+    # Proteção estrita contra travamento/throttling de rede do YouTube
+    opts["socket_timeout"] = 10  # Timeout de 10 segundos por socket TCP
+    opts["retries"] = 2          # Máximo 2 retentativas de requisição
+    opts["fragment_retries"] = 2 # Máximo 2 retentativas por pedaço de áudio
+    opts["concurrent_fragment_downloads"] = 1
+    opts["http_chunk_size"] = 1048576  # Baixa em blocos de 1MB para evitar throttling e travamento do YouTube
     return opts
 
 # Print configuration status on import
@@ -247,6 +254,14 @@ def _is_rate_limit_error(error_msg: str) -> bool:
         "confirm you're not a bot",
         "confirm you’re not a bot",
         "bot",
+        "timeout",
+        "timed out",
+        "read timeout",
+        "incompleteread",
+        "connection reset",
+        "connection refused",
+        "network is unreachable",
+        "throttled",
     ]
     error_lower = str(error_msg).lower()
     return any(indicator.lower() in error_lower for indicator in rate_limit_indicators)
