@@ -18,7 +18,7 @@ from typing import Optional, List, Dict, Tuple
 
 # ── Configuration ────────────────────────────────────────────────────────────
 SLSKD_HOST = os.getenv("SLSKD_HOST", "http://127.0.0.1:5030")
-SLSKD_API_KEY = os.getenv("SLSKD_API_KEY", "laplayer-slskd-api-key-2026")
+SLSKD_API_KEY = os.getenv("SLSKD_API_KEY", "")
 SLSKD_URL_BASE = "/api/v0"
 
 # Audio extensions ranked by quality preference (higher index = better)
