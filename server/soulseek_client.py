@@ -177,19 +177,20 @@ class SoulseekDownloader:
             self._delete_search(search_id)
             return None
 
-        # 4. Rank and pick best file
-        best = self._rank_results(responses, artist, title)
+        # 4. Rank and pick best files
+        candidates = self._rank_results(responses, artist, title)
 
         # 5. Clean up search
         self._delete_search(search_id)
 
-        if best:
-            print(f"[Soulseek] Melhor resultado: {best['username']} — {best['filename']} "
+        if candidates:
+            best = candidates[0]
+            print(f"[Soulseek] Encontrados {len(candidates)} candidatos. Melhor: {best['username']} — {best['filename']} "
                   f"({best.get('bitRate', '?')}kbps, {best.get('size', 0) / 1024 / 1024:.1f}MB)")
         else:
             print(f"[Soulseek] Nenhum resultado válido para '{query}'")
 
-        return best
+        return candidates
 
     # ── Download ───────────────────────────────────────────────────────────
     def download(
@@ -299,17 +300,24 @@ class SoulseekDownloader:
             print("[Soulseek] slskd não está disponível")
             return None
 
-        result = self.search(artist, title, timeout=search_timeout)
-        if not result:
+        candidates = self.search(artist, title, timeout=search_timeout)
+        if not candidates:
             return None
 
-        return self.download(
-            username=result["username"],
-            filename=result["filename"],
-            size=result.get("size", 0),
-            target_path=target_path,
-            timeout=download_timeout,
-        )
+        for idx, cand in enumerate(candidates):
+            print(f"[Soulseek] Tentando candidato ({idx + 1}/{len(candidates)}): {cand['username']} — {cand['filename']}")
+            res = self.download(
+                username=cand["username"],
+                filename=cand["filename"],
+                size=cand.get("size", 0),
+                target_path=target_path,
+                timeout=download_timeout,
+            )
+            if res and os.path.exists(res):
+                return res
+            print(f"[Soulseek] ⚠ Candidato '{cand['username']}' falhou/timed out. Tentando próximo...")
+
+        return None
 
     # ── Internal helpers ───────────────────────────────────────────────────
     def _delete_search(self, search_id: str):
@@ -429,13 +437,13 @@ class SoulseekDownloader:
                 }))
 
         if not candidates:
-            return None
+            return []
 
         # Sort by score descending
         candidates.sort(key=lambda x: x[0], reverse=True)
 
-        # Return best candidate
-        return candidates[0][1]
+        # Return top candidates (up to 5)
+        return [c[1] for c in candidates[:5]]
 
     def _flatten_transfers(self, data) -> list:
         """Flatten the transfers response which can be nested by directory."""
