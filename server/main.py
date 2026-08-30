@@ -663,6 +663,7 @@ async def download_track(
             if start_idx >= len(entries):
                 start_idx = max(0, len(entries) - 1)
                 
+            consecutive_errors = 0
             # Tentamos baixar cada vídeo retornado na busca
             for entry_idx in range(start_idx, len(entries)):
                 entry = entries[entry_idx]
@@ -748,8 +749,15 @@ async def download_track(
                         error_str = result.stderr or result.stdout or f"exit code {result.returncode}"
                         print(f"[Backend] Falha ao baixar {video_url}: {error_str[:300]}")
                         if _is_rate_limit_error(error_str):
-                                    except: pass
-                            break
+                            consecutive_errors += 1
+                            if consecutive_errors >= 2 or entry_idx >= 1:
+                                _mark_yt_rate_limited()
+                                for ext_clean in [final_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'mp4', 'part', 'ytdl']:
+                                    residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext_clean}")
+                                    if os.path.exists(residual):
+                                        try: os.remove(residual)
+                                        except: pass
+                                break
                 except subprocess.TimeoutExpired:
                     print(f"[Backend] ⏰ TIMEOUT ({_DL_TIMEOUT}s)! Download travou em {video_url} — pulando")
                     # Após 2 timeouts seguidos, marca como rate-limited e pula pro Soulseek
