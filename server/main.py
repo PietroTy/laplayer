@@ -673,27 +673,24 @@ async def download_track(
                 # ── Filtro de duração PREVENTIVO (antes de baixar) ─────────────
                 # Rejeita vídeos exageradamente longos (ex: lives de 3 horas ou compilações gigantes)
                 video_duration_s = entry.get('duration') or 0
-                if video_duration_s > 0:
-                    if request.duration_ms and request.duration_ms > 0:
-                        expected_s = request.duration_ms / 1000
-                        # Aceita até 3x a duração esperada ou 25 minutos absolutos (o que for maior)
-                        # para dar segurança contra compilações mas sem capar músicas longas de verdade
-                        max_allowed_s = max(expected_s * 3.0 + 60, 1500)
-                        if video_duration_s > max_allowed_s:
-                            print(f"[Backend] Pulando vídeo extremamente longo: {video_duration_s:.0f}s > {max_allowed_s:.0f}s max | {video_id}")
-                            continue
-                        
-                        # Rejeita vídeos extremamente curtos (como teasers, ringtones ou sound effects)
-                        # Aceita apenas se tiver pelo menos 50% da duração esperada (para músicas com mais de 10s)
-                        min_allowed_s = expected_s * 0.5
-                        if video_duration_s < min_allowed_s and expected_s > 10:
-                            print(f"[Backend] Pulando vídeo extremamente curto: {video_duration_s:.0f}s < {min_allowed_s:.0f}s min (esperado {expected_s:.0f}s) | {video_id}")
-                            continue
-                    else:
-                        # Sem duração de referência: rejeita vídeos com mais de 25 minutos (provável compilação de horas)
-                        if video_duration_s > 1500:
-                            print(f"[Backend] Pulando vídeo sem referência muito longo: {video_duration_s:.0f}s > 1500s | {video_id}")
-                            continue
+                expected_s = (request.duration_ms or 0) / 1000
+                if expected_s > 0:
+                    max_allowed_s = expected_s * 2.5
+                    if video_duration_s > max_allowed_s:
+                        print(f"[Backend] Pulando vídeo extremamente longo: {video_duration_s:.0f}s > {max_allowed_s:.0f}s max | {video_id}")
+                        continue
+                    
+                    # Rejeita vídeos extremamente curtos (como teasers, ringtones ou sound effects)
+                    # Aceita apenas se tiver pelo menos 50% da duração esperada (para músicas com mais de 10s)
+                    min_allowed_s = expected_s * 0.5
+                    if video_duration_s < min_allowed_s and expected_s > 10:
+                        print(f"[Backend] Pulando vídeo extremamente curto: {video_duration_s:.0f}s < {min_allowed_s:.0f}s min (esperado {expected_s:.0f}s) | {video_id}")
+                        continue
+                else:
+                    # Sem duração de referência: rejeita vídeos com mais de 25 minutos (provável compilação de horas)
+                    if video_duration_s > 1500:
+                        print(f"[Backend] Pulando vídeo sem referência muito longo: {video_duration_s:.0f}s > 1500s | {video_id}")
+                        continue
 
                 video_url = f"https://www.youtube.com/watch?v={video_id}" if not video_id.startswith('http') else video_id
                 print(f"[Backend] Tentando baixar video ({entry_idx + 1}/{len(entries)}): {video_url} [{video_duration_s:.0f}s]")
@@ -741,6 +738,7 @@ async def download_track(
                         if fsize > 10000:  # > 10KB = arquivo válido
                             print(f"[Backend] Sucesso! Baixado: {video_url} -> {found}")
                             downloaded_file = found
+                            consecutive_errors = 0
                             break
                         else:
                             print(f"[Backend] Arquivo muito pequeno ({fsize}B), descartando: {found}")
@@ -750,11 +748,6 @@ async def download_track(
                         error_str = result.stderr or result.stdout or f"exit code {result.returncode}"
                         print(f"[Backend] Falha ao baixar {video_url}: {error_str[:300]}")
                         if _is_rate_limit_error(error_str):
-                            _mark_yt_rate_limited()
-                            for ext_clean in [final_ext, 'opus', 'm4a', 'mp3', 'flac', 'webm', 'ogg', 'mp4', 'part', 'ytdl']:
-                                residual = os.path.join(TEMP_DIR, f"{base_filename}.{ext_clean}")
-                                if os.path.exists(residual):
-                                    try: os.remove(residual)
                                     except: pass
                             break
                 except subprocess.TimeoutExpired:

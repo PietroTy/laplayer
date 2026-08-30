@@ -63,6 +63,20 @@ class SoulseekDownloader:
         try:
             r = self._session.get(f"{self.base}/application", headers=self._headers(), timeout=3)
             if r.status_code == 200:
+                data = r.json()
+                srv = data.get("server", {})
+                if srv.get("isLoggedIn"):
+                    return True
+                # Se estiver em processo de login, aguarda até 5s
+                if srv.get("isConnected") or srv.get("isLoggingIn"):
+                    for _ in range(10):
+                        time.sleep(0.5)
+                        try:
+                            r2 = self._session.get(f"{self.base}/application", headers=self._headers(), timeout=1.5)
+                            if r2.status_code == 200 and r2.json().get("server", {}).get("isLoggedIn"):
+                                return True
+                        except Exception:
+                            pass
                 return True
         except Exception:
             pass
@@ -80,13 +94,16 @@ class SoulseekDownloader:
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
-                for _ in range(12):  # Poll por até 6s (12 x 0.5s)
+                for _ in range(16):  # Poll por até 8s para subir e fazer login
                     time.sleep(0.5)
                     try:
                         r = self._session.get(f"{self.base}/application", headers=self._headers(), timeout=1.5)
                         if r.status_code == 200:
-                            print("[Soulseek] ✅ Daemon slskd iniciado com sucesso na porta 5030!")
-                            return True
+                            data = r.json()
+                            srv = data.get("server", {})
+                            if srv.get("isLoggedIn"):
+                                print("[Soulseek] ✅ Daemon slskd iniciado e logado com sucesso na porta 5030!")
+                                return True
                     except Exception:
                         pass
             except Exception as e:
@@ -127,6 +144,16 @@ class SoulseekDownloader:
                 headers=self._headers(),
                 timeout=10,
             )
+            if r.status_code == 409:
+                # Daemon em processo de login — aguarda 3s e tenta criar a busca novamente
+                print("[Soulseek] Daemon efetuando login na rede Soulseek, aguardando 3s...")
+                time.sleep(3)
+                r = self._session.post(
+                    f"{self.base}/searches",
+                    json={"searchText": query},
+                    headers=self._headers(),
+                    timeout=10,
+                )
             if r.status_code not in (200, 201):
                 print(f"[Soulseek] Erro ao criar busca: HTTP {r.status_code} — {r.text[:200]}")
                 return None
