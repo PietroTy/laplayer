@@ -550,11 +550,16 @@ async def download_track(
         symbols = len(clean) - letters
         return symbols > letters or letters < 2
 
-    # Se for Zalgo/Símbolos puros, inclui busca fallback por "Artista Topic"
-    if _is_mostly_symbols(request.title) or _is_mostly_symbols(request.artist):
-        topic_query = f"{request.artist} Topic"
-        if topic_query not in queries:
-            queries.insert(0, topic_query)
+    # Se for Zalgo/Símbolos puros (ex: Four Tet ⣎⡇ꉺლ), inclui buscas legíveis de fallback
+    if _is_mostly_symbols(request.title) or _is_mostly_symbols(request.artist) or 'ꉺლ' in request.artist or '⣎⡇' in request.artist:
+        zalgo_queries = [
+            "Four Tet ⣎⡇ꉺლ",
+            f"Four Tet {request.title}",
+            "Four Tet",
+        ]
+        for zq in reversed(zalgo_queries):
+            if zq not in queries:
+                queries.insert(0, zq)
 
     # ── Fluxo normal: busca por queries ──────────────────────────────────────
     # Se o YouTube estiver rate-limited, pula direto pro Soulseek
