@@ -127,9 +127,14 @@ class SoulseekDownloader:
         or None if nothing suitable is found within *timeout* seconds.
         """
         # Clean up search query for Soulseek
-        clean_artist = re.sub(r'[\,\.\-_]', ' ', artist).strip()
-        clean_title = re.sub(r'[\,\.\-_]', ' ', title).strip()
-        query = f"{clean_artist} {clean_title}".strip()
+        art_clean = re.sub(r'[\,\.\-_]', ' ', artist).strip()
+        tit_clean = re.sub(r'[\,\.\-_]', ' ', title).strip()
+        if art_clean and tit_clean:
+            pattern = re.compile(rf'^{re.escape(art_clean)}\s*[\-\:\–\—\~]?\s*', re.IGNORECASE)
+            new_title = pattern.sub('', tit_clean).strip()
+            if new_title:
+                tit_clean = new_title
+        query = f"{art_clean} {tit_clean}".strip()
         query = re.sub(r'\s+', ' ', query)
         if not query:
             return None

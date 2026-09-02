@@ -308,7 +308,19 @@ def cleanup_file(filepath: str):
     except Exception as e:
         print(f"Erro ao limpar {filepath}: {e}")
 
+def _clean_artist_title(artist: str, title: str) -> tuple[str, str]:
+    """Remove duplicate artist prefix from title if present (e.g. 'Rita Lee - Amor e sexo' -> 'Amor e sexo')."""
+    art = (artist or "").strip()
+    tit = (title or "").strip()
+    if art and tit:
+        pattern = re.compile(rf'^{re.escape(art)}\s*[\-\:\–\—\~]?\s*', re.IGNORECASE)
+        new_title = pattern.sub('', tit).strip()
+        if new_title:
+            tit = new_title
+    return art, tit
+
 def clean_query_string(artist: str, title: str) -> str:
+    artist, title = _clean_artist_title(artist, title)
     # 1. Normaliza fontes Unicode/Vaporwave/Fullwidth (NFKC)
     title = unicodedata.normalize('NFKC', title)
     artist = unicodedata.normalize('NFKC', artist)
@@ -482,28 +494,25 @@ async def download_track(
             print(f"Aviso: falha ao baixar capa: {e}")
             cover_path = None
 
-    # Limpar string de busca base para evitar parênteses longos e pontuações estranhas
-    clean_base = clean_query_string(request.artist, request.title)
-    raw_query = f"{request.artist} {request.title}"
+    # Limpar redundância se o título já contém o nome do artista (ex: "Rita Lee - Amor e sexo" -> "Amor e sexo")
+    req_artist, req_title = _clean_artist_title(request.artist, request.title)
 
-    # Query sem termos restritos/bloqueados do YouTube (ex: 'sex', 'ex', 'explicit')
-    # que causam 0 resultados na busca do yt-dlp/YouTube API
-    unrestricted_query = re.sub(r'\b(sex|ex|explicit|nsfw|nude|porn)\b', '', raw_query, flags=re.IGNORECASE)
-    unrestricted_query = re.sub(r'[\'\"’]', '', unrestricted_query)
-    unrestricted_query = re.sub(r'\s+', ' ', unrestricted_query).strip()
+    # Limpar string de busca base para evitar parênteses longos e pontuações estranhas
+    clean_base = clean_query_string(req_artist, req_title)
+    raw_query = f"{req_artist} {req_title}"
 
     # Query somente com artista + título sem termos em parênteses
-    title_clean = re.sub(r'[\(\[][^\)\]]*[\)\]]', '', request.title).strip()
-    title_only_query = f"{request.artist} {title_clean}".strip()
+    title_clean = re.sub(r'[\(\[][^\)\]]*[\)\]]', '', req_title).strip()
+    title_only_query = f"{req_artist} {title_clean}".strip()
 
     candidate_queries = [
         clean_base,
-        f"{request.artist} {request.title} official audio",
-        f"{request.artist} {request.title} audio",
+        f"{req_artist} {req_title} official audio",
+        f"{req_artist} {req_title} audio",
         raw_query,
-        unrestricted_query,
         title_only_query,
-        request.title
+        f"{req_artist} {req_title} musica",
+        req_title
     ]
 
     # Remove duplicatas mantendo a ordem
