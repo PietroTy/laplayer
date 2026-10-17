@@ -61,7 +61,7 @@ class StandaloneDownloader {
         data: {
           'title': title,
           'artist': artist,
-          'album': album,
+          'album': album ?? '',
           'imageUrl': imageUrl,
           'duration_ms': durationMs ?? 0,
           'audio_format': format,
@@ -139,22 +139,19 @@ class StandaloneDownloader {
       final targetPath = p.join(targetFolder.path, sanitizedFilename);
 
       // ── SERVIDOR BACKEND (Prioridade Absoluta) ─────────────────────────────
-      final candidateServerUrls = <String>[];
-      const fixedProdUrl = 'https://laplayer-api.magiktarot.com.br';
-      candidateServerUrls.add(fixedProdUrl);
+      const fixedProdUrl = 'https://laplayer-api.pietroty.com.br';
+      final candidateServerUrls = <String>[fixedProdUrl];
 
+      // Adiciona URL em cache se já funcionou antes (e for diferente da produção)
       if (_cachedWorkingServerUrl != null && !candidateServerUrls.contains(_cachedWorkingServerUrl)) {
         candidateServerUrls.add(_cachedWorkingServerUrl!);
       }
+      // Adiciona URL das prefs apenas se for diferente da produção
       if (serverUrl.isNotEmpty && !candidateServerUrls.contains(serverUrl)) {
         candidateServerUrls.add(serverUrl);
       }
-      if (!candidateServerUrls.contains('http://10.0.2.2:3004')) {
-        candidateServerUrls.add('http://10.0.2.2:3004'); // Emulador Android
-      }
-      if (!candidateServerUrls.contains('http://127.0.0.1:3004')) {
-        candidateServerUrls.add('http://127.0.0.1:3004'); // PC Local
-      }
+
+      debugPrint('[StandaloneDownloader] Tentando ${candidateServerUrls.length} servidor(es): $candidateServerUrls');
 
       for (final sUrl in candidateServerUrls) {
         final serverFile = await _downloadViaServer(
