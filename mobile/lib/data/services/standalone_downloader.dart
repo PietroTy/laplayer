@@ -48,52 +48,65 @@ class StandaloneDownloader {
     debugPrint('[StandaloneDownloader] Conectando ao backend server: $endpoint');
     onProgress('Solicitando ao servidor Vitals ($artist - $title)...', 0.1);
 
-    try {
-      final response = await _dio.post(
-        endpoint,
-        data: {
-          'title': title,
-          'artist': artist,
-          'album': album ?? '',
-          'imageUrl': imageUrl,
-          'duration_ms': durationMs ?? 0,
-          'audio_format': format,
-          'audio_quality': quality,
-        },
-        options: Options(
-          headers: {
-            'X-Access-Key': accessKey.isNotEmpty ? accessKey : 'LAPLAYER-VIP-8812',
+    // Uma queda de conexão (ex: o túnel cai no meio da resposta) não pode jogar direto pro
+    // download nativo: tenta o servidor de novo. Respostas do servidor (404 não achou, 403) não repetem.
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      try {
+        final response = await _dio.post(
+          endpoint,
+          data: {
+            'title': title,
+            'artist': artist,
+            'album': album ?? '',
+            'imageUrl': imageUrl,
+            'duration_ms': durationMs ?? 0,
+            'audio_format': format,
+            'audio_quality': quality,
           },
-          responseType: ResponseType.bytes,
-        ),
-        onReceiveProgress: (received, total) {
-          if (total > 0) {
-            final pct = 0.2 + (0.75 * (received / total));
-            onProgress(
-              'Baixando do servidor (${(received / (1024 * 1024)).toStringAsFixed(1)} / ${(total / (1024 * 1024)).toStringAsFixed(1)} MB)...',
-              pct,
-            );
-          } else {
-            onProgress('Processando e convertendo áudio no servidor...', 0.3);
-          }
-        },
-      );
+          options: Options(
+            headers: {
+              'X-Access-Key': accessKey.isNotEmpty ? accessKey : 'LAPLAYER-VIP-8812',
+            },
+            responseType: ResponseType.bytes,
+          ),
+          onReceiveProgress: (received, total) {
+            if (total > 0) {
+              final pct = 0.2 + (0.75 * (received / total));
+              onProgress(
+                'Baixando do servidor (${(received / (1024 * 1024)).toStringAsFixed(1)} / ${(total / (1024 * 1024)).toStringAsFixed(1)} MB)...',
+                pct,
+              );
+            } else {
+              onProgress('Processando e convertendo áudio no servidor...', 0.3);
+            }
+          },
+        );
 
-      if (response.statusCode == 200 && response.data != null) {
-        final bytes = response.data as List<int>;
-        if (bytes.length > 10000) {
-          final file = File(targetPath);
-          if (file.existsSync()) {
-            try { file.deleteSync(); } catch (_) {}
+        if (response.statusCode == 200 && response.data != null) {
+          final bytes = response.data as List<int>;
+          if (bytes.length > 10000) {
+            final file = File(targetPath);
+            if (file.existsSync()) {
+              try { file.deleteSync(); } catch (_) {}
+            }
+            await file.writeAsBytes(bytes, flush: true);
+            onProgress('Concluído via Servidor!', 1.0);
+            debugPrint('[StandaloneDownloader] SUCESSO via Servidor ($cleanUrl): ${file.path} (${(bytes.length / (1024 * 1024)).toStringAsFixed(2)} MB)');
+            return file;
           }
-          await file.writeAsBytes(bytes, flush: true);
-          onProgress('Concluído via Servidor!', 1.0);
-          debugPrint('[StandaloneDownloader] SUCESSO via Servidor ($cleanUrl): ${file.path} (${(bytes.length / (1024 * 1024)).toStringAsFixed(2)} MB)');
-          return file;
         }
+        return null;
+      } on DioException catch (e) {
+        debugPrint('[StandaloneDownloader] Servidor $endpoint falhou (tentativa $attempt): $e');
+        final status = e.response?.statusCode;
+        final transient = status == null || status >= 500;  // conexão caiu ou servidor/túnel com erro
+        if (!transient || attempt == 2) return null;
+        onProgress('Conexão com o servidor caiu, tentando de novo...', 0.1);
+        await Future.delayed(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('[StandaloneDownloader] Erro ao salvar resposta do servidor: $e');
+        return null;
       }
-    } catch (e) {
-      debugPrint('[StandaloneDownloader] Servidor $endpoint indisponível ou erro: $e');
     }
     return null;
   }

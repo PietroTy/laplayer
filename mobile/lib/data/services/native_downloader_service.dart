@@ -35,6 +35,9 @@ class NativeDownloaderService {
   NativeDownloaderService._internal();
 
   final YoutubeExplode _yt = YoutubeExplode();
+  /// Tempo máximo pra baixar um stream do YouTube no celular antes de desistir
+  static const _maxStreamTime = Duration(seconds: 120);
+
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 25),
     receiveTimeout: const Duration(seconds: 60),
@@ -501,18 +504,26 @@ class NativeDownloaderService {
     for (final streamInfo in audioStreams) {
       _log('⬇ Baixando via Dio: ${streamInfo.container.name} ${streamInfo.bitrate.kiloBitsPerSecond} kbps');
 
+      // O YouTube às vezes manda o stream a conta-gotas: o receiveTimeout não dispara
+      // (sempre chega algum byte) e o download ficava preso pra sempre em 35%
+      final cancelToken = CancelToken();
+      final watchdog = Timer(_maxStreamTime, () => cancelToken.cancel('download passou de ${_maxStreamTime.inSeconds}s'));
       try {
         final t0 = _sw.elapsedMilliseconds;
         await _dio.download(
           streamInfo.url.toString(),
           targetFile.path,
+          cancelToken: cancelToken,
           onReceiveProgress: (received, total) {
+            final mb = (received / (1024 * 1024)).toStringAsFixed(1);
             if (total > 0) {
               final downloadProgress = 0.35 + (0.45 * (received / total));
               onProgress?.call(
                 downloadProgress,
-                'Baixando HD (${(received / (1024 * 1024)).toStringAsFixed(1)} / ${(total / (1024 * 1024)).toStringAsFixed(1)} MB)...',
+                'Baixando HD ($mb / ${(total / (1024 * 1024)).toStringAsFixed(1)} MB)...',
               );
+            } else {
+              onProgress?.call(0.35, 'Baixando HD ($mb MB)...');
             }
           },
           options: Options(
@@ -522,6 +533,7 @@ class NativeDownloaderService {
             },
           ),
         );
+        watchdog.cancel();
 
         final dlTime = _sw.elapsedMilliseconds - t0;
         if (targetFile.existsSync() && targetFile.lengthSync() > 10000) {
@@ -531,6 +543,7 @@ class NativeDownloaderService {
           break;
         }
       } catch (dioErr) {
+        watchdog.cancel();
         _log('❌ Dio download falhou: $dioErr. Tentando stream chunking...');
 
         try {
@@ -540,7 +553,12 @@ class NativeDownloaderService {
           final totalBytes = streamInfo.size.totalBytes;
           int downloadedBytes = 0;
 
+          final streamClock = Stopwatch()..start();
           await for (final chunk in audioStream.timeout(const Duration(seconds: 45))) {
+            if (streamClock.elapsed > _maxStreamTime) {
+              await outputStream.close();
+              throw TimeoutException('stream passou de ${_maxStreamTime.inSeconds}s');
+            }
             downloadedBytes += chunk.length;
             outputStream.add(chunk);
 
