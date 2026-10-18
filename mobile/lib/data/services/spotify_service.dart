@@ -12,7 +12,7 @@ class SpotifyService {
     final raw = input.trim();
     if (raw.isEmpty) return null;
 
-    // 1. Caso de URL da web (ex: open.spotify.com/.../playlist/37i9dQZF1DXcBWIGoYBM5M)
+    // 1. Caso de URL da web ou URI (ex: open.spotify.com/.../playlist/37i9dQZF1DXcBWIGoYBM5M ou spotify:playlist:...)
     final playlistUrlRegex = RegExp(r'playlist[/:]([a-zA-Z0-9]{15,30})');
     final matchUrl = playlistUrlRegex.firstMatch(raw);
     if (matchUrl != null) {
@@ -33,69 +33,148 @@ class SpotifyService {
     final parsed = parsePlaylistId(input);
     if (parsed != null) return parsed;
 
-    final trimmed = input.trim();
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    // Procura por qualquer URL http(s) dentro do texto colado
+    final urlRegex = RegExp(r'https?://[^\s]+');
+    final match = urlRegex.firstMatch(input.trim());
+    if (match != null) {
+      final urlStr = match.group(0)!;
       try {
         final client = HttpClient();
         client.connectionTimeout = const Duration(seconds: 8);
-        final request = await client.getUrl(Uri.parse(trimmed));
-        request.followRedirects = false;
+        final request = await client.getUrl(Uri.parse(urlStr));
+        request.followRedirects = true;
+        request.maxRedirects = 5;
         final response = await request.close();
-        final location = response.headers.value('location');
-        if (location != null && location.isNotEmpty) {
-          final redirectedParsed = parsePlaylistId(location);
-          if (redirectedParsed != null) return redirectedParsed;
-        }
+        
+        final finalUrl = response.redirects.isNotEmpty
+            ? response.redirects.last.location.toString()
+            : request.uri.toString();
+            
+        final redirectedParsed = parsePlaylistId(finalUrl);
+        if (redirectedParsed != null) return redirectedParsed;
       } catch (_) {}
     }
     return null;
   }
 
-  Future<String?> _getToken([String? playlistId]) async {
+  /// Obtém um access token anônimo funcional do Spotify.
+  /// Nunca solicita o token da página de embed da própria playlist (pois não contém token),
+  /// usando URLs de embed de faixas/editoriais confiáveis.
+  Future<String?> _getToken() async {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (_cachedAccessToken != null && now < _tokenExpirationMs - 60000) {
       return _cachedAccessToken;
     }
 
-    try {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 10);
-      final targetUrl = playlistId != null && playlistId.isNotEmpty
-          ? 'https://open.spotify.com/embed/playlist/$playlistId'
-          : 'https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT';
-          
-      final request = await client.getUrl(Uri.parse(targetUrl));
-      request.headers.set(
-        'User-Agent',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      );
+    final targetUrls = [
+      'https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT',
+      'https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M',
+    ];
 
-      final response = await request.close();
-      final html = await response.transform(utf8.decoder).join();
+    for (final targetUrl in targetUrls) {
+      try {
+        final client = HttpClient();
+        client.connectionTimeout = const Duration(seconds: 8);
+        final request = await client.getUrl(Uri.parse(targetUrl));
+        request.headers.set(
+          'User-Agent',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        );
 
-      final match = RegExp(r'"accessToken":"([^"]+)"').firstMatch(html);
-      if (match != null && match.group(1) != null) {
-        _cachedAccessToken = match.group(1)!;
-        _tokenExpirationMs = now + (3000 * 1000);
-        return _cachedAccessToken;
+        final response = await request.close();
+        if (response.statusCode == 200) {
+          final html = await response.transform(utf8.decoder).join();
+          final match = RegExp(r'"accessToken":"([^"]+)"').firstMatch(html);
+          if (match != null && match.group(1) != null) {
+            _cachedAccessToken = match.group(1)!;
+            _tokenExpirationMs = now + (3000 * 1000);
+            return _cachedAccessToken;
+          }
+        }
+      } catch (e) {
+        debugPrint('[SpotifyService] Erro ao obter token em $targetUrl: $e');
       }
-      return null;
-    } catch (e) {
-      return null;
     }
+
+    return null;
   }
 
+  /// Obtém metadados da playlist (Nome, Descrição, Capa, Total de Faixas).
   Future<Map<String, dynamic>?> getPlaylistDetails(String playlistId) async {
     final cleanId = parsePlaylistId(playlistId) ?? playlistId.trim().split('?')[0].replaceAll('/', '');
-    
-    // Método 1: Tentar via embed HTML (100% público e sem rate-limit)
+    final token = await _getToken();
+
+    // Método 1: Tentar via GQL queryPlaylist (retorna todos os detalhes completos)
+    if (token != null) {
+      try {
+        const gqlHash = '908a5597b4d0af0489a9ad6a2d41bc3b416ff47c0884016d92bbd6822d0eb6d8';
+        final variables = jsonEncode({
+          'uri': 'spotify:playlist:$cleanId',
+          'offset': 0,
+          'limit': 1,
+        });
+        final extensions = jsonEncode({
+          'persistedQuery': {
+            'version': 1,
+            'sha256Hash': gqlHash,
+          }
+        });
+
+        final queryUri = Uri.parse(
+          'https://api-partner.spotify.com/pathfinder/v1/query'
+          '?operationName=queryPlaylist'
+          '&variables=${Uri.encodeComponent(variables)}'
+          '&extensions=${Uri.encodeComponent(extensions)}',
+        );
+
+        final client = HttpClient();
+        client.connectionTimeout = const Duration(seconds: 10);
+        final request = await client.getUrl(queryUri);
+        request.headers.set('Authorization', 'Bearer $token');
+        request.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
+        request.headers.set('App-Platform', 'WebPlayer');
+
+        final response = await request.close();
+        if (response.statusCode == 200) {
+          final responseBody = await response.transform(utf8.decoder).join();
+          final gdata = jsonDecode(responseBody);
+          final pdata = gdata['data']?['playlistV2'];
+
+          if (pdata != null && pdata['__typename'] == 'Playlist') {
+            final name = (pdata['name'] as String?) ?? 'Playlist do Spotify';
+            final description = (pdata['description'] as String?) ?? '';
+            final images = pdata['images']?['items'] as List? ?? [];
+            String imageUrl = '';
+            if (images.isNotEmpty && images[0]['sources'] != null) {
+              final sources = images[0]['sources'] as List? ?? [];
+              if (sources.isNotEmpty) {
+                imageUrl = sources[0]['url'] ?? '';
+              }
+            }
+            final totalTracks = (pdata['content']?['totalCount'] as int?) ?? 0;
+
+            return {
+              'name': name,
+              'description': description,
+              'image_url': imageUrl,
+              'spotify_url': 'https://open.spotify.com/playlist/$cleanId',
+              'total_tracks': totalTracks,
+            };
+          }
+        }
+      } catch (e) {
+        debugPrint('[SpotifyService] Erro ao obter detalhes da playlist via GQL: $e');
+      }
+    }
+
+    // Método 2: Fallback via Embed HTML
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 8);
       final embedUrl = 'https://open.spotify.com/embed/playlist/$cleanId';
       final request = await client.getUrl(Uri.parse(embedUrl));
       request.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-      
+
       final response = await request.close();
       if (response.statusCode == 200) {
         final html = await response.transform(utf8.decoder).join();
@@ -108,7 +187,7 @@ class SpotifyService {
             final imageUrl = images.isNotEmpty ? images[0]['url'] : '';
 
             return {
-              'name': entity['name'] ?? entity['title'] ?? 'Playlist',
+              'name': entity['name'] ?? entity['title'] ?? 'Playlist do Spotify',
               'description': entity['subtitle'] ?? '',
               'image_url': imageUrl,
               'spotify_url': 'https://open.spotify.com/playlist/$cleanId',
@@ -119,37 +198,6 @@ class SpotifyService {
       }
     } catch (_) {}
 
-    // Método 2: Fallback via API com token anônimo
-    final token = await _getToken(cleanId);
-    if (token == null) return null;
-
-    try {
-      final client = HttpClient();
-      final url = 'https://api.spotify.com/v1/playlists/$cleanId?fields=name,description,images,external_urls,tracks(total)';
-      final request = await client.getUrl(Uri.parse(url));
-      request.headers.set('Authorization', 'Bearer $token');
-      request.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-      
-      final response = await request.close();
-      final responseBody = await response.transform(utf8.decoder).join();
-      final data = jsonDecode(responseBody);
-
-      if (response.statusCode == 200) {
-        final images = data['images'] as List? ?? [];
-        final imageUrl = images.isNotEmpty ? images[0]['url'] : '';
-
-        return {
-          'name': data['name'] ?? 'Playlist',
-          'description': data['description'] ?? '',
-          'image_url': imageUrl,
-          'spotify_url': data['external_urls']?['spotify'] ?? '',
-          'total_tracks': data['tracks']?['total'] ?? 0,
-        };
-      }
-    } catch (e) {
-      debugPrint('[SpotifyService] Erro ao obter detalhes da playlist via API: $e');
-    }
-    
     return {
       'name': 'Playlist do Spotify',
       'description': '',
@@ -161,7 +209,7 @@ class SpotifyService {
 
   Future<String?> getPlaylistSnapshot(String playlistId) async {
     final cleanId = parsePlaylistId(playlistId) ?? playlistId.trim().split('?')[0].replaceAll('/', '');
-    final token = await _getToken(cleanId);
+    final token = await _getToken();
     if (token == null) return null;
 
     try {
@@ -169,7 +217,7 @@ class SpotifyService {
       final url = 'https://api.spotify.com/v1/playlists/$cleanId?fields=snapshot_id';
       final request = await client.getUrl(Uri.parse(url));
       request.headers.set('Authorization', 'Bearer $token');
-      
+
       final response = await request.close();
       final responseBody = await response.transform(utf8.decoder).join();
       final data = jsonDecode(responseBody);
@@ -180,21 +228,150 @@ class SpotifyService {
     }
   }
 
-  /// Paginador ilimitado de faixas usando Spotify GQL Pathfinder (capaz de puxar playlists de 10.000+ faixas)
+  /// Paginador ilimitado de faixas usando Spotify GQL Pathfinder com fallback para Embed HTML.
   Future<List<Track>> getPlaylistTracks(
     String playlistId, {
     Function(int)? onProgress,
-    Function(List<Track>)? onTracksFetched,
+    Future<void> Function(List<Track>)? onTracksFetched,
   }) async {
     final cleanId = parsePlaylistId(playlistId) ?? playlistId.trim().split('?')[0].replaceAll('/', '');
-    // Método 1: Extração rápida via Embed HTML (100% público, sem token, instantâneo)
+    final token = await _getToken();
+
+    // ── Método 1: GQL queryPlaylist com paginação total ──────────────────
+    if (token != null) {
+      try {
+        debugPrint('[SpotifyService] Iniciando extração GQL para a playlist $cleanId...');
+        final client = HttpClient();
+        client.connectionTimeout = const Duration(seconds: 15);
+
+        const gqlHash = '908a5597b4d0af0489a9ad6a2d41bc3b416ff47c0884016d92bbd6822d0eb6d8';
+        List<Track> allGqlTracks = [];
+        int offset = 0;
+        bool hasMore = true;
+        int totalCount = 0;
+
+        while (hasMore) {
+          final variables = jsonEncode({
+            'uri': 'spotify:playlist:$cleanId',
+            'offset': offset,
+            'limit': 100,
+          });
+
+          final extensions = jsonEncode({
+            'persistedQuery': {
+              'version': 1,
+              'sha256Hash': gqlHash,
+            }
+          });
+
+          final queryUri = Uri.parse(
+            'https://api-partner.spotify.com/pathfinder/v1/query'
+            '?operationName=queryPlaylist'
+            '&variables=${Uri.encodeComponent(variables)}'
+            '&extensions=${Uri.encodeComponent(extensions)}',
+          );
+
+          final request = await client.getUrl(queryUri);
+          request.headers.set('Authorization', 'Bearer $token');
+          request.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
+          request.headers.set('App-Platform', 'WebPlayer');
+
+          final response = await request.close();
+          if (response.statusCode != 200) break;
+
+          final responseBody = await response.transform(utf8.decoder).join();
+          final gdata = jsonDecode(responseBody);
+
+          final pdata = gdata['data']?['playlistV2'];
+          if (pdata == null || pdata['__typename'] != 'Playlist') {
+            break;
+          }
+
+          final content = pdata['content'];
+          if (content == null) break;
+          totalCount = (content['totalCount'] as int?) ?? totalCount;
+
+          final items = content['items'] as List? ?? [];
+          if (items.isEmpty) {
+            hasMore = false;
+            break;
+          }
+
+          final List<Track> batchTracks = [];
+          for (final item in items) {
+            final tdata = item['itemV2']?['data'];
+            if (tdata == null) continue;
+
+            final title = (tdata['name'] as String?) ?? '';
+            if (title.isEmpty) continue;
+
+            final uri = (tdata['uri'] as String?) ?? '';
+            final trackId = uri.contains(':') ? uri.split(':').last : (tdata['id'] as String? ?? '');
+            if (trackId.isEmpty) continue;
+
+            final artistItems = tdata['artists']?['items'] as List? ?? [];
+            final artistList = artistItems
+                .map((a) => a['profile']?['name'] as String?)
+                .where((name) => name != null && name.isNotEmpty)
+                .cast<String>()
+                .toList();
+
+            final artist = artistList.isNotEmpty ? artistList.join(', ') : 'Artista Desconhecido';
+            final primaryArtist = artistList.isNotEmpty ? artistList.first : artist;
+
+            final albumObj = tdata['albumOfTrack'];
+            final albumName = (albumObj?['name'] as String?) ?? '';
+            final coverSources = albumObj?['coverArt']?['sources'] as List? ?? [];
+            final coverUrl = coverSources.isNotEmpty ? coverSources[0]['url'] as String? : null;
+
+            final durationMs = (tdata['trackDuration']?['totalMilliseconds'] as int?) ?? 0;
+
+            batchTracks.add(Track(
+              id: trackId,
+              spotifyUri: uri.isNotEmpty ? uri : 'spotify:track:$trackId',
+              playlistPosition: allGqlTracks.length + batchTracks.length,
+              title: title,
+              artist: artist,
+              primaryArtist: primaryArtist,
+              album: albumName,
+              albumArtUrl: coverUrl,
+              durationMs: durationMs,
+              playlistId: cleanId,
+              spotifyUrl: 'https://open.spotify.com/track/$trackId',
+            ));
+          }
+
+          if (batchTracks.isEmpty) {
+            hasMore = false;
+          } else {
+            allGqlTracks.addAll(batchTracks);
+            if (onTracksFetched != null) await onTracksFetched(batchTracks);
+            if (onProgress != null) onProgress(allGqlTracks.length);
+
+            offset += batchTracks.length;
+            if (batchTracks.length < 100 || (totalCount > 0 && offset >= totalCount)) {
+              hasMore = false;
+            }
+          }
+        }
+
+        if (allGqlTracks.isNotEmpty) {
+          debugPrint('[SpotifyService] Sucesso GQL: ${allGqlTracks.length} faixas extraídas com sucesso!');
+          return allGqlTracks;
+        }
+      } catch (gqlErr) {
+        debugPrint('[SpotifyService] Erro na extração GQL: $gqlErr');
+      }
+    }
+
+    // ── Método 2: Fallback Embed HTML (até 50 faixas) ────────────────────
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 10);
       final embedUrl = 'https://open.spotify.com/embed/playlist/$cleanId';
       final request = await client.getUrl(Uri.parse(embedUrl));
       request.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-      
+
       final response = await request.close();
       if (response.statusCode == 200) {
         final html = await response.transform(utf8.decoder).join();
@@ -233,7 +410,7 @@ class SpotifyService {
 
             if (embedTracks.isNotEmpty) {
               debugPrint('[SpotifyService] Sucesso Embed HTML: ${embedTracks.length} faixas extraídas com sucesso!');
-              if (onTracksFetched != null) onTracksFetched(embedTracks);
+              if (onTracksFetched != null) await onTracksFetched(embedTracks);
               if (onProgress != null) onProgress(embedTracks.length);
               return embedTracks;
             }
@@ -241,121 +418,10 @@ class SpotifyService {
         }
       }
     } catch (e) {
-      debugPrint('[SpotifyService] Aviso no método Embed HTML: $e. Tentando paginação GQL...');
-    }
-
-    // Método 2: Paginação GQL (para playlists gigantes que necessitam de paginação de 100+ itens)
-    final token = await _getToken(cleanId);
-    if (token != null) {
-      try {
-        debugPrint('[SpotifyService] Iniciando extração GQL para a playlist $cleanId...');
-        final client = HttpClient();
-        client.connectionTimeout = const Duration(seconds: 15);
-        
-        const gqlHash = '86dde7b9d9356e2369414647cf6950cfed96e778e129cfdfc99aea6c1613b3b0';
-        List<Track> allGqlTracks = [];
-        int offset = 0;
-        bool hasMore = true;
-
-        while (hasMore) {
-          final variables = jsonEncode({
-            'uri': 'spotify:playlist:$cleanId',
-            'offset': offset,
-            'limit': 100,
-          });
-
-          final extensions = jsonEncode({
-            'persistedQuery': {
-              'version': 1,
-              'sha256Hash': gqlHash,
-            }
-          });
-
-          final queryUri = Uri.parse(
-            'https://api-partner.spotify.com/pathfinder/v1/query'
-            '?operationName=fetchPlaylistContents'
-            '&variables=${Uri.encodeComponent(variables)}'
-            '&extensions=${Uri.encodeComponent(extensions)}',
-          );
-
-          final request = await client.getUrl(queryUri);
-          request.headers.set('Authorization', 'Bearer $token');
-          request.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
-          request.headers.set('App-Platform', 'WebPlayer');
-
-          final response = await request.close();
-          if (response.statusCode != 200) break;
-
-          final responseBody = await response.transform(utf8.decoder).join();
-          final gdata = jsonDecode(responseBody);
-
-          final items = gdata['data']?['playlistV2']?['content']?['items'] as List? ?? [];
-          if (items.isEmpty) {
-            hasMore = false;
-            break;
-          }
-
-          final List<Track> batchTracks = [];
-          for (final item in items) {
-            final tdata = item['itemV2']?['data'];
-            if (tdata == null) continue;
-
-            final title = (tdata['name'] as String?) ?? '';
-            if (title.isEmpty) continue;
-
-            final uri = (tdata['uri'] as String?) ?? '';
-            final trackId = uri.contains(':') ? uri.split(':').last : (tdata['id'] as String? ?? '');
-
-            final artistItems = tdata['artists']?['items'] as List? ?? [];
-            final artistList = artistItems
-                .map((a) => a['profile']?['name'] as String?)
-                .where((name) => name != null && name.isNotEmpty)
-                .cast<String>()
-                .toList();
-
-            final artist = artistList.isNotEmpty ? artistList.join(', ') : 'Artista Desconhecido';
-            final primaryArtist = artistList.isNotEmpty ? artistList.first : artist;
-
-            final albumObj = tdata['albumOfTrack'];
-            final albumName = (albumObj?['name'] as String?) ?? '';
-            final coverSources = albumObj?['coverArt']?['sources'] as List? ?? [];
-            final coverUrl = coverSources.isNotEmpty ? coverSources[0]['url'] as String? : null;
-
-            final durationMs = (tdata['trackDuration']?['totalMilliseconds'] as int?) ?? 0;
-
-            batchTracks.add(Track(
-              id: trackId,
-              spotifyUri: uri.isNotEmpty ? uri : 'spotify:track:$trackId',
-              playlistPosition: allGqlTracks.length + batchTracks.length,
-              title: title,
-              artist: artist,
-              primaryArtist: primaryArtist,
-              album: albumName,
-              albumArtUrl: coverUrl,
-              durationMs: durationMs,
-              playlistId: cleanId,
-              spotifyUrl: 'https://open.spotify.com/track/$trackId',
-            ));
-          }
-
-          if (batchTracks.isEmpty) {
-            hasMore = false;
-          } else {
-            allGqlTracks.addAll(batchTracks);
-            if (onTracksFetched != null) onTracksFetched(batchTracks);
-            if (onProgress != null) onProgress(allGqlTracks.length);
-
-            offset += 100;
-            if (items.length < 100) hasMore = false;
-          }
-        }
-
-        if (allGqlTracks.isNotEmpty) return allGqlTracks;
-      } catch (gqlErr) {
-        debugPrint('[SpotifyService] Erro na extração GQL: $gqlErr');
-      }
+      debugPrint('[SpotifyService] Aviso no método Embed HTML: $e');
     }
 
     return [];
   }
 }
+

@@ -75,7 +75,7 @@ def _get_base_opts() -> dict:
     
     # Enable the remote component challenge solver script needed for YouTube JS challenge solving
     opts["remote_components"] = "ejs:github"
-    opts["extractor_args"] = {"youtube": {"player_client": ["android", "web"]}}
+    opts["extractor_args"] = {"youtube": {"player_client": ["mweb", "ios", "tv", "android_creator"]}}
 
     # Proteção estrita contra travamento/throttling de rede do YouTube
     opts["socket_timeout"] = 10  # Timeout de 10 segundos por socket TCP
@@ -204,16 +204,22 @@ def trigger_ghost_watch_async():
     threading.Thread(target=simulate_ghost_watch, daemon=True).start()
 
 # ── Lifespan (substitui @app.on_event deprecado) ──────────────────────────
+def _check_soulseek_async():
+    try:
+        slsk = get_soulseek_client()
+        if slsk.is_available():
+            print("[Backend] ✅ Soulseek (slskd) disponível como fonte de fallback")
+        else:
+            print("[Backend] ⚠ Soulseek (slskd) não disponível — apenas YouTube será usado")
+    except Exception as e:
+        print(f"[Backend] ⚠ Erro ao checar Soulseek: {e}")
+
 @asynccontextmanager
 async def lifespan(app):
     print("[Backend] Iniciando Ghost Watcher na inicialização do servidor...")
     trigger_ghost_watch_async()
-    # Verifica se o slskd está disponível
-    slsk = get_soulseek_client()
-    if slsk.is_available():
-        print("[Backend] ✅ Soulseek (slskd) disponível como fonte de fallback")
-    else:
-        print("[Backend] ⚠ Soulseek (slskd) não disponível — apenas YouTube será usado")
+    # Checa Soulseek em background para NÃO travar a inicialização do Uvicorn na porta 3004
+    threading.Thread(target=_check_soulseek_async, daemon=True).start()
     yield
 
 app = FastAPI(
@@ -293,7 +299,7 @@ _QUALITY_MAP = {
 class TrackRequest(BaseModel):
     title: str
     artist: str
-    album: str
+    album: Optional[str] = ""
     imageUrl: Optional[str] = None
     duration_ms: Optional[int] = 0
     skip_match: Optional[int] = 0
@@ -318,6 +324,18 @@ def _clean_artist_title(artist: str, title: str) -> tuple[str, str]:
         if new_title:
             tit = new_title
     return art, tit
+
+# Palavras que o YouTube costuma bloquear em buscas — serão removidas das queries YT
+# mas mantidas para buscas no Soulseek
+_YT_BLOCKED_WORDS = re.compile(
+    r'\b(hentai|porn|pornô|xxx|nsfw|nude|naked|sex tape|cp|loli|shotacon)\b',
+    re.IGNORECASE
+)
+
+def _sanitize_for_youtube(s: str) -> str:
+    """Remove termos bloqueados pelo YouTube para evitar resultados vazios."""
+    sanitized = _YT_BLOCKED_WORDS.sub('', s)
+    return re.sub(r'\s+', ' ', sanitized).strip()
 
 def clean_query_string(artist: str, title: str) -> str:
     artist, title = _clean_artist_title(artist, title)
@@ -505,15 +523,24 @@ async def download_track(
     title_clean = re.sub(r'[\(\[][^\)\]]*[\)\]]', '', req_title).strip()
     title_only_query = f"{req_artist} {title_clean}".strip()
 
+    # Verifica se o título/artista contém palavras bloqueadas pelo YouTube
+    has_blocked = bool(_YT_BLOCKED_WORDS.search(req_title) or _YT_BLOCKED_WORDS.search(req_artist))
+    clean_base_yt = _sanitize_for_youtube(clean_base) if has_blocked else clean_base
+    title_clean_yt = _sanitize_for_youtube(title_clean) if has_blocked else title_clean
+    req_title_yt = _sanitize_for_youtube(req_title) if has_blocked else req_title
+
     candidate_queries = [
-        clean_base,
-        f"{req_artist} {req_title} official audio",
-        f"{req_artist} {req_title} audio",
-        raw_query,
-        title_only_query,
-        f"{req_artist} {req_title} musica",
-        req_title
+        clean_base_yt,
+        f"{req_artist} {req_title_yt} official audio",
+        f"{req_artist} {req_title_yt} audio",
+        _sanitize_for_youtube(raw_query) if has_blocked else raw_query,
+        f"{req_artist} {title_clean_yt}".strip(),
+        f"{req_artist} {req_title_yt} musica",
+        _sanitize_for_youtube(req_title) if has_blocked else req_title
     ]
+
+    if has_blocked:
+        print(f"[Backend] Título contém termos bloqueados pelo YT — buscando versão sanitizada")
 
     # Remove duplicatas mantendo a ordem
     queries = []
@@ -690,7 +717,10 @@ async def download_track(
                 video_duration_s = entry.get('duration') or 0
                 expected_s = (request.duration_ms or 0) / 1000
                 if expected_s > 0:
-                    max_allowed_s = expected_s * 2.5
+                    # Músicas longas (> 2min) têm tolerância maior (3.5x) pois é comum
+                    # existirem versões levemente estendidas ou ao vivo no YouTube
+                    duration_multiplier = 3.5 if expected_s > 120 else 2.5
+                    max_allowed_s = expected_s * duration_multiplier
                     if video_duration_s > max_allowed_s:
                         print(f"[Backend] Pulando vídeo extremamente longo: {video_duration_s:.0f}s > {max_allowed_s:.0f}s max | {video_id}")
                         continue
@@ -927,8 +957,8 @@ def fetch_fresh_spotify_token() -> Optional[str]:
     })
     
     urls = [
-        "https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M",
         "https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT",
+        "https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M",
     ]
     
     for url in urls:
