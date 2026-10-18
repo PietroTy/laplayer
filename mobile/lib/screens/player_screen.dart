@@ -512,6 +512,7 @@ class _LyricsSheet extends ConsumerStatefulWidget {
 }
 
 class _LyricsSheetState extends ConsumerState<_LyricsSheet> {
+  late Track _track = widget.track;
   bool _isLoading = true;
   LyricsResult? _lyricsResult;
   bool _isSyncEnabled = true;
@@ -533,9 +534,10 @@ class _LyricsSheetState extends ConsumerState<_LyricsSheet> {
   }
 
   Future<void> _loadLyrics() async {
+    final track = _track;
     try {
-      final res = await LyricsService.instance.getLyrics(widget.track);
-      if (mounted) {
+      final res = await LyricsService.instance.getLyrics(track);
+      if (mounted && track.id == _track.id) {
         setState(() {
           _lyricsResult = res;
           _lineKeys.clear();
@@ -548,12 +550,25 @@ class _LyricsSheetState extends ConsumerState<_LyricsSheet> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && track.id == _track.id) {
         setState(() {
           _isLoading = false;
         });
       }
     }
+  }
+
+  // Música trocou com a letra aberta: carrega a letra da nova em vez de fechar a folha
+  void _switchTrack(Track track) {
+    setState(() {
+      _track = track;
+      _isLoading = true;
+      _lyricsResult = null;
+      _lastActiveIndex = -1;
+      _lineKeys.clear();
+    });
+    if (_scrollController.hasClients) _scrollController.jumpTo(0);
+    _loadLyrics();
   }
 
   int _findActiveLineIndex(List<LyricsLine> lines, Duration currentPos) {
@@ -572,12 +587,11 @@ class _LyricsSheetState extends ConsumerState<_LyricsSheet> {
     final playerState = ref.watch(playerProvider);
     final playerNotifier = ref.read(playerProvider.notifier);
     
-    // Se a música tocando no player mudou, recarrega a letra!
-    if (playerState.currentTrack?.id != widget.track.id) {
+    // Se a música tocando no player mudou, recarrega a letra
+    final current = playerState.currentTrack;
+    if (current != null && current.id != _track.id) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Navigator.pop(context); // Fecha a letra da música antiga
-        }
+        if (mounted && current.id != _track.id) _switchTrack(current);
       });
     }
 
@@ -608,7 +622,7 @@ class _LyricsSheetState extends ConsumerState<_LyricsSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.track.title,
+                        _track.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -618,7 +632,7 @@ class _LyricsSheetState extends ConsumerState<_LyricsSheet> {
                         ),
                       ),
                       Text(
-                        widget.track.artist,
+                        _track.artist,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
