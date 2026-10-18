@@ -9,6 +9,7 @@ import threading
 import concurrent.futures
 import subprocess
 import json
+import difflib
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Query, Depends
 from fastapi.responses import FileResponse
@@ -366,6 +367,66 @@ def clean_query_string(artist: str, title: str) -> str:
     query = f"{artist.strip()} {title.strip()}"
     return re.sub(r'\s+', ' ', query).strip()
 
+def _is_mostly_symbols(s: str) -> bool:
+    """Nome feito de símbolos/Zalgo (ex: ⣎⡇ꉺლ, ωσя∂ѕ/////) que a busca do YouTube não acha por texto."""
+    clean = re.sub(r'[\s\(\)\[\]\-_]', '', s or '')
+    if not clean: return True
+    letters = len(re.findall(r'[\w\u3040-\u30FF\u4E00-\u9FFF]', clean))
+    return len(clean) - letters > letters or letters < 2
+
+def _compact(s: str) -> str:
+    return re.sub(r'\s+', '', unicodedata.normalize('NFKC', s or '')).lower()
+
+# Artistas cujo nome não aparece na busca: termo que traz o canal Topic deles
+_ARTIST_SEARCH_HINTS = {'⣎⡇ꉺლ': 'Four Tet ⣎⡇ꉺლ'}  # alias do Four Tet
+
+def _find_topic_track(artist: str, title: str, expected_s: float) -> Optional[str]:
+    """Para faixas de símbolos: acha o canal Topic do artista e escolhe a faixa
+    pelo título exato ou, se não bater, pela duração (±2s)."""
+    primary = artist.split(',')[0].strip()
+    hint_key = next((k for k in _ARTIST_SEARCH_HINTS if k in artist or k in title), None)
+    stripped = re.sub(r'[/\\|]+', ' ', title).strip()
+    searches = [_ARTIST_SEARCH_HINTS[hint_key]] if hint_key else [f"{primary} {stripped}", primary]
+    want = _compact(primary)
+
+    def _is_artist_channel(channel: str) -> bool:
+        if not channel.endswith(' - Topic'):
+            return False
+        name = _compact(channel[:-len(' - Topic')])
+        if hint_key and name.startswith(_compact(hint_key)):
+            return True
+        return bool(name) and (name == want or name.startswith(want) or want.startswith(name))
+
+    opts = {'extract_flat': True, 'quiet': True, 'no_warnings': True, **_get_base_opts()}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            channel_id = None
+            for q in searches:
+                res = ydl.extract_info(f"ytsearch10:{q}", download=False) or {}
+                channel_id = next((e['channel_id'] for e in res.get('entries') or []
+                                   if e.get('channel_id') and _is_artist_channel(e.get('channel') or '')), None)
+                if channel_id:
+                    break
+            if not channel_id:
+                return None
+            catalog = ydl.extract_info(f"https://www.youtube.com/channel/{channel_id}", download=False) or {}
+    except Exception as e:
+        print(f"[Backend] Falha ao consultar canal Topic: {e}")
+        return None
+
+    entries = [e for e in catalog.get('entries') or [] if e.get('id')]
+    target = _compact(title)
+    match = next((e for e in entries if _compact(e.get('title')) == target), None)
+    if not match and expected_s > 0:
+        close = [e for e in entries if e.get('duration') and abs(e['duration'] - expected_s) <= 2]
+        if close:
+            match = max(close, key=lambda e: difflib.SequenceMatcher(None, _compact(e.get('title')), target).ratio())
+    if not match:
+        print(f"[Backend] Canal Topic encontrado, mas nenhuma faixa bateu com '{title}'")
+        return None
+    print(f"[Backend] Faixa achada no canal Topic: {match.get('title')} [{match.get('duration')}s]")
+    return f"https://www.youtube.com/watch?v={match['id']}"
+
 @app.get("/api/search")
 async def search_tracks(q: str, limit: int = 8):
     """
@@ -553,14 +614,24 @@ async def download_track(
 
     downloaded_file = None
 
-    # ── Caminho rápido: URL do YouTube fornecida diretamente ─────────────────
-    if request.youtube_url:
-        print(f"[Backend] Download direto de URL: {request.youtube_url} [{fmt_key}]")
+    # Títulos/artistas de símbolos não são achados por texto: procura no canal Topic do artista,
+    # e na busca geral só aceita vídeo com a duração praticamente igual
+    symbolic = _is_mostly_symbols(request.title) or _is_mostly_symbols(request.artist)
+    direct_url = request.youtube_url
+    if symbolic:
+        primary_artist = request.artist.split(',')[0].strip()
+        queries.insert(0, f"{primary_artist} {re.sub(r'[/\\|]+', ' ', request.title).strip()}")
+        if not direct_url:
+            direct_url = _find_topic_track(request.artist, request.title, (request.duration_ms or 0) / 1000)
+
+    # ── Caminho rápido: URL do YouTube conhecida ─────────────────────────────
+    if direct_url:
+        print(f"[Backend] Download direto de URL: {direct_url} [{fmt_key}]")
         outtmpl_base = os.path.join(TEMP_DIR, base_filename)
         ydl_opts = _build_ydl_opts(f"{outtmpl_base}.%(ext)s")
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.extract_info(request.youtube_url, download=True)
+                ydl.extract_info(direct_url, download=True)
                 found = _find_downloaded_file(outtmpl_base, final_ext)
                 if found:
                     downloaded_file = found
@@ -568,25 +639,6 @@ async def download_track(
         except Exception as e:
             print(f"[Backend] Falha no download direto: {e}")
             # Cai no fluxo normal de busca se o download direto falhar
-
-    # Detecta se a música/artista é puramente ruído de símbolos/Zalgo
-    def _is_mostly_symbols(s: str) -> bool:
-        clean = re.sub(r'[\s\(\)\[\]\-_]', '', s)
-        if not clean: return True
-        letters = len(re.findall(r'[\w\u3040-\u30FF\u4E00-\u9FFF]', clean))
-        symbols = len(clean) - letters
-        return symbols > letters or letters < 2
-
-    # Se for Zalgo/Símbolos puros (ex: Four Tet ⣎⡇ꉺლ), inclui buscas legíveis de fallback
-    if _is_mostly_symbols(request.title) or _is_mostly_symbols(request.artist) or 'ꉺლ' in request.artist or '⣎⡇' in request.artist:
-        zalgo_queries = [
-            "Four Tet ⣎⡇ꉺლ",
-            f"Four Tet {request.title}",
-            "Four Tet",
-        ]
-        for zq in reversed(zalgo_queries):
-            if zq not in queries:
-                queries.insert(0, zq)
 
     # ── Fluxo normal: busca por queries ──────────────────────────────────────
     # Se o YouTube estiver rate-limited, pula direto pro Soulseek
@@ -730,6 +782,10 @@ async def download_track(
                     min_allowed_s = expected_s * 0.5
                     if video_duration_s < min_allowed_s and expected_s > 10:
                         print(f"[Backend] Pulando vídeo extremamente curto: {video_duration_s:.0f}s < {min_allowed_s:.0f}s min (esperado {expected_s:.0f}s) | {video_id}")
+                        continue
+
+                    if symbolic and abs(video_duration_s - expected_s) > 3:
+                        print(f"[Backend] Pulando (título de símbolos exige duração igual): {video_duration_s:.0f}s vs {expected_s:.0f}s | {video_id}")
                         continue
                 else:
                     # Sem duração de referência: rejeita vídeos com mais de 25 minutos (provável compilação de horas)
