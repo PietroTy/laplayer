@@ -514,30 +514,38 @@ async def download_track(
 
     print(f"[Backend] Formato={fmt_key}, Qualidade={quality_key} ({audio_quality_val}kbps)")
 
-    def _build_ydl_opts(outtmpl_base: str) -> dict:
-        """Constrói as opções yt-dlp sem re-encoding desnecessário do FFmpeg (extração direta)."""
-        postprocessors = []
-        # Converte apenas se o container original for incompatível
-        pp = {
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': preferred_codec,
-            'preferredquality': audio_quality_val, # respeita a qualidade configurada no app (64, 128, 192, ou 0=best)
-        }
-        postprocessors.append(pp)
-        # Embute metadados
-        postprocessors.append({'key': 'FFmpegMetadata', 'add_metadata': True})
+    _DL_TIMEOUT = 30  # segundos máximo por vídeo
 
-        return {
-            'format': yt_format_selector,
-            'outtmpl': outtmpl_base,
-            'quiet': True,
-            'no_warnings': True,
-            'noplaylist': True,
-            'nocheckcertificate': True,
-            'geo_bypass': True,
-            **_get_base_opts(),
-            'postprocessors': postprocessors,
-        }
+    def _run_ytdlp(video_url: str, outtmpl_base: str) -> subprocess.CompletedProcess:
+        """Baixa via subprocesso com timeout REAL (SIGKILL). Levanta TimeoutExpired."""
+        cmd = [
+            "yt-dlp",
+            "--no-playlist",
+            "--no-check-certificates",
+            "--geo-bypass",
+            "--quiet", "--no-warnings",
+            "--socket-timeout", "10",
+            "--retries", "2",
+            "--fragment-retries", "2",
+            "--http-chunk-size", "1M",
+            "--extractor-args", "youtube:player_client=android,web",
+            "-x", "--audio-format", preferred_codec,
+            "--audio-quality", audio_quality_val,
+            "--embed-metadata",
+            "-o", f"{outtmpl_base}.%(ext)s",
+            video_url,
+        ]
+        # Adiciona cookies se existirem
+        cookie_file = _COOKIE_OPTS.get("cookiefile")
+        if cookie_file and os.path.isfile(cookie_file):
+            cmd.insert(1, "--cookies")
+            cmd.insert(2, cookie_file)
+        return subprocess.run(
+            cmd,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True, text=True,
+            timeout=_DL_TIMEOUT,
+        )
 
     def _find_downloaded_file(base: str, expected_ext: str) -> Optional[str]:
         """Acha o arquivo gerado pelo yt-dlp (pode ser com extensão diferente)."""
@@ -628,17 +636,17 @@ async def download_track(
     if direct_url:
         print(f"[Backend] Download direto de URL: {direct_url} [{fmt_key}]")
         outtmpl_base = os.path.join(TEMP_DIR, base_filename)
-        ydl_opts = _build_ydl_opts(f"{outtmpl_base}.%(ext)s")
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.extract_info(direct_url, download=True)
-                found = _find_downloaded_file(outtmpl_base, final_ext)
-                if found:
-                    downloaded_file = found
-                    print(f"[Backend] Download direto concluído: {downloaded_file}")
-        except Exception as e:
-            print(f"[Backend] Falha no download direto: {e}")
-            # Cai no fluxo normal de busca se o download direto falhar
+            result = _run_ytdlp(direct_url, outtmpl_base)
+            found = _find_downloaded_file(outtmpl_base, final_ext)
+            if found and os.path.getsize(found) > 10000:
+                downloaded_file = found
+                print(f"[Backend] Download direto concluído: {downloaded_file}")
+            else:
+                print(f"[Backend] Falha no download direto: {(result.stderr or result.stdout or f'exit code {result.returncode}')[:300]}")
+        except subprocess.TimeoutExpired:
+            print(f"[Backend] ⏰ TIMEOUT ({_DL_TIMEOUT}s) no download direto")
+        # Se falhar, cai no fluxo normal de busca
 
     # ── Fluxo normal: busca por queries ──────────────────────────────────────
     # Se o YouTube estiver rate-limited, pula direto pro Soulseek
@@ -797,41 +805,8 @@ async def download_track(
                 print(f"[Backend] Tentando baixar video ({entry_idx + 1}/{len(entries)}): {video_url} [{video_duration_s:.0f}s]")
                 
                 outtmpl_base = os.path.join(TEMP_DIR, base_filename)
-                ydl_opts = _build_ydl_opts(f"{outtmpl_base}.%(ext)s")
-                    
-                # ── Download via subprocesso com timeout REAL (SIGKILL) ──
-                _DL_TIMEOUT = 30  # segundos máximo por vídeo
-                outtmpl_arg = f"{outtmpl_base}.%(ext)s"
-                cmd = [
-                    "yt-dlp",
-                    "--no-playlist",
-                    "--no-check-certificates",
-                    "--geo-bypass",
-                    "--quiet", "--no-warnings",
-                    "--socket-timeout", "10",
-                    "--retries", "2",
-                    "--fragment-retries", "2",
-                    "--http-chunk-size", "1M",
-                    "--extractor-args", "youtube:player_client=android,web",
-                    "-x", "--audio-format", preferred_codec,
-                    "--audio-quality", audio_quality_val,
-                    "--embed-metadata",
-                    "-o", outtmpl_arg,
-                    video_url,
-                ]
-                # Adiciona cookies se existirem
-                cookie_file = _COOKIE_OPTS.get("cookiefile")
-                if cookie_file and os.path.isfile(cookie_file):
-                    cmd.insert(1, "--cookies")
-                    cmd.insert(2, cookie_file)
-
                 try:
-                    result = subprocess.run(
-                        cmd,
-                        cwd=os.path.dirname(os.path.abspath(__file__)),
-                        capture_output=True, text=True,
-                        timeout=_DL_TIMEOUT,
-                    )
+                    result = _run_ytdlp(video_url, outtmpl_base)
                     # Verifica se o arquivo foi baixado (ffprobe warnings causam exit code != 0 mas o arquivo existe)
                     found = _find_downloaded_file(outtmpl_base, final_ext)
                     if found:
