@@ -656,6 +656,12 @@ async def download_track(
         yt_skipped = True
 
     if not downloaded_file and not yt_skipped:
+        # Se nenhuma busca trouxer nada, o YouTube provavelmente filtrou a combinação de palavras
+        # (ex: "Cowgirl Doggystyle" volta vazio, "Kuselofte Cowgirl" acha): tenta tirando uma palavra
+        # do título por vez, exigindo duração igual pra não pegar música errada
+        got_any_results = False
+        strict_duration = symbolic
+        req_title_words = re.sub(r'[\(\[][^\)\]]*[\)\]]', '', req_title).split()
         for attempt_idx, query in enumerate(queries):
             print(f"[Backend] Tentando busca rápida ({attempt_idx + 1}/{len(queries)}): {query}")
             
@@ -681,7 +687,12 @@ async def download_track(
                 
             if not entries:
                 print(f"[Backend] Nenhum resultado para '{query}'")
+                if attempt_idx == len(queries) - 1 and not got_any_results and not strict_duration and 1 < len(req_title_words) <= 6:
+                    strict_duration = True
+                    queries.extend(f"{req_artist} {' '.join(req_title_words[:i] + req_title_words[i + 1:])}" for i in range(len(req_title_words)))
+                    print(f"[Backend] Busca sem resultado nenhum: tentando sem uma palavra do título por vez")
                 continue
+            got_any_results = True
 
             # ── Algoritmo Inteligente de Ranking v2.5 (Desempate por Nome em Durações Iguais) ──
             def _score_entry(e):
@@ -792,8 +803,8 @@ async def download_track(
                         print(f"[Backend] Pulando vídeo extremamente curto: {video_duration_s:.0f}s < {min_allowed_s:.0f}s min (esperado {expected_s:.0f}s) | {video_id}")
                         continue
 
-                    if symbolic and abs(video_duration_s - expected_s) > 3:
-                        print(f"[Backend] Pulando (título de símbolos exige duração igual): {video_duration_s:.0f}s vs {expected_s:.0f}s | {video_id}")
+                    if strict_duration and abs(video_duration_s - expected_s) > 3:
+                        print(f"[Backend] Pulando (busca aproximada exige duração igual): {video_duration_s:.0f}s vs {expected_s:.0f}s | {video_id}")
                         continue
                 else:
                     # Sem duração de referência: rejeita vídeos com mais de 25 minutos (provável compilação de horas)
