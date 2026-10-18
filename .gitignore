@@ -42,3 +42,6 @@ server/slskd-data/
 !README.md
 !server_url.txt
 !app-release.apk
+
+# APK vai pra Release do GitHub (gh release create vX.Y.Z app-release.apk)
+*.apk
