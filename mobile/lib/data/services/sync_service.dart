@@ -88,7 +88,7 @@ class SyncService extends StateNotifier<SyncState> {
       }
 
       // 2. Apaga arquivo de letras (.lrc) e fallbacks pelo nome sanitizado
-      final baseName = '${FileUtils.sanitizeFilename(track.artist)} - ${FileUtils.sanitizeFilename(track.title)}';
+      final baseName = FileUtils.trackBaseName(track.artist, track.title);
       final lrcFile = File(p.join(musicDirRoot, '$baseName.lrc'));
       if (await lrcFile.exists()) {
         try {
@@ -152,7 +152,7 @@ class SyncService extends StateNotifier<SyncState> {
     }
 
     // 2. Fallback: padrão do NativeDownloader com qualquer extensão suportada
-    final baseName = '${FileUtils.sanitizeFilename(track.artist)} - ${FileUtils.sanitizeFilename(track.title)}';
+    final baseName = FileUtils.trackBaseName(track.artist, track.title);
     for (final ext in FileUtils.audioExtensions) {
       final candidate = File(p.join(musicDir, '$baseName.$ext'));
       final exists = await candidate.exists();

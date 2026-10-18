@@ -145,7 +145,7 @@ class ManifestService {
 
       // 2. Fallback: "Artist - Title" com qualquer extensão
       if (matchedPath == null) {
-        final baseName = '${FileUtils.sanitizeFilename(track.artist)} - ${FileUtils.sanitizeFilename(track.title)}';
+        final baseName = FileUtils.trackBaseName(track.artist, track.title);
         for (final ext in FileUtils.audioExtensions) {
           final key = '$baseName.$ext'.toLowerCase();
           if (filenameToPath.containsKey(key)) {

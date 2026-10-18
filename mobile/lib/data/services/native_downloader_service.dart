@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import '../../core/file_utils.dart';
+
 enum AudioQualityPreset {
   normal,   // ~96-128 kbps
   high,     // ~160 kbps
@@ -144,14 +146,6 @@ class NativeDownloaderService {
       }
     }
     return changed ? result : query; // retorna original se nada mudou
-  }
-
-  /// Sanitiza o nome do arquivo para gravação em disco
-  String sanitizeFilename(String filename) {
-    return filename
-        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
   }
 
   /// Converte string de tempo (ex: "4:07" ou "1:02:15") em segundos
@@ -488,7 +482,7 @@ class NativeDownloaderService {
     
     _log('✨ Stream selecionada: ${preferredStream.container.name} ${preferredStream.bitrate.kiloBitsPerSecond} kbps ext=$ext');
 
-    final sanitizedFilename = sanitizeFilename('$artistName - $trackTitle$ext');
+    final sanitizedFilename = '${FileUtils.trackBaseName(artistName, trackTitle)}$ext';
     final targetFile = File(p.join(targetDirectory, sanitizedFilename));
 
     if (targetFile.existsSync()) {

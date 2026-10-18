@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants.dart';
+import '../../core/file_utils.dart';
 import 'native_downloader_service.dart';
 
 class StandaloneDownloader {
@@ -26,14 +27,6 @@ class StandaloneDownloader {
   Future<String> authenticateSpotify(Function(String) onUrlReady) async => '';
   Future<bool> checkAuth() async => true;
   Future<bool> saveCredentials(String jsonContent) async => true;
-
-  /// Sanitiza o nome do arquivo para gravação em disco
-  String _sanitizeFilename(String filename) {
-    return filename
-        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-  }
 
   /// Tenta baixar a faixa usando o servidor backend (FastAPI + yt-dlp)
   Future<File?> _downloadViaServer({
@@ -135,7 +128,7 @@ class StandaloneDownloader {
       final formatStr = prefs.getString('download_audio_format') ?? 'm4a';
       final qualityStr = prefs.getString('download_audio_quality') ?? 'high';
 
-      final sanitizedFilename = _sanitizeFilename('$artist - $title.$formatStr');
+      final sanitizedFilename = '${FileUtils.trackBaseName(artist, title)}.$formatStr';
       final targetPath = p.join(targetFolder.path, sanitizedFilename);
 
       // ── SERVIDOR BACKEND (Prioridade Absoluta) ─────────────────────────────

@@ -132,7 +132,7 @@ class LyricsService {
   Future<String?> _lrcPathForTrack(Track track) async {
     final musicDirRoot = await AppConstants.getMusicDirectory();
     
-    final baseName = '${FileUtils.sanitizeFilename(track.artist)} - ${FileUtils.sanitizeFilename(track.title)}';
+    final baseName = FileUtils.trackBaseName(track.artist, track.title);
 
     return p.join(musicDirRoot, '$baseName.lrc');
   }
