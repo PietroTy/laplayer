@@ -90,14 +90,25 @@ def _get_base_opts() -> dict:
 print(f"[Backend] Node.js detectado para resolver desafios do YouTube: {_NODE_PATH}")
 
 # ── Sistema de Chaves de Acesso (App License Keys) ──────────────────────
-VALID_KEYS = {
-    "LAPLAYER-Pietro-7717",
-    "LAPLAYER-Alpha-9901",
-    "LAPLAYER-VIP-8812",
-    "LAPLAYER-Beta-4521",
-    "LAPLAYER-Friend-3021",
-    "LAPLAYER-Secret-5541",
-}
+def _load_env():
+    """Lê o .env da pasta do LaPlayer e o da pasta server (KEY=valor), sem trocar o que já veio do ambiente.
+    As chaves e senhas ficam só ali: o código é público."""
+    for path in (os.path.join(_SCRIPT_DIR, "..", ".env"), os.path.join(_SCRIPT_DIR, ".env")):
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+_load_env()
+
+# Chaves aceitas: LAPLAYER_KEYS no .env, separadas por vírgula. Sem nenhuma, o servidor recusa tudo.
+VALID_KEYS = {k.strip() for k in os.getenv("LAPLAYER_KEYS", "").split(",") if k.strip()}
+if not VALID_KEYS:
+    print("[Backend] AVISO: nenhuma chave em LAPLAYER_KEYS (.env); todos os pedidos serão recusados.")
 
 def verify_access_key(
     x_access_key: Optional[str] = Header(None, alias="X-Access-Key"),

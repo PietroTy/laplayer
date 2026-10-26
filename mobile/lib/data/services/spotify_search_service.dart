@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/server_config.dart';
 import '../models/track.dart';
 
 /// Serviço que faz buscas de músicas na API oficial do Spotify usando Client Credentials ou Proxy no Servidor.
@@ -15,17 +16,9 @@ class SpotifySearchService {
   String? _accessToken;
   int _tokenExpirationMs = 0;
 
-  Future<String> _getServerUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    // O servidor escolhido em Configurações; sem nenhum, o do PietroTy.
-    final url = (prefs.getString('server_url') ?? '').trim();
-    return url.isNotEmpty ? url : 'https://laplayer-api.pietroty.com.br';
-  }
+  Future<String> _getServerUrl() => configuredServerUrl();
 
-  Future<String> _getAccessKey() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('access_key') ?? 'LAPLAYER-VIP-8812';
-  }
+  Future<String> _getAccessKey() => configuredAccessKey();
 
   /// Obtém um token web anônimo do Spotify (usado publicamente pelo player web embed)
   /// com fallback automático para o servidor backend.

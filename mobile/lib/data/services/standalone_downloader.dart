@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/server_config.dart';
 
 import '../../core/constants.dart';
 import '../../core/file_utils.dart';
@@ -65,7 +66,7 @@ class StandaloneDownloader {
           },
           options: Options(
             headers: {
-              'X-Access-Key': accessKey.isNotEmpty ? accessKey : 'LAPLAYER-VIP-8812',
+              'X-Access-Key': accessKey,
             },
             responseType: ResponseType.bytes,
           ),
@@ -136,8 +137,8 @@ class StandaloneDownloader {
       }
 
       final prefs = await SharedPreferences.getInstance();
-      final serverUrl = prefs.getString('server_url') ?? '';
-      final accessKey = prefs.getString('access_key') ?? 'LAPLAYER-VIP-8812';
+      final serverUrl = await configuredServerUrl();
+      final accessKey = await configuredAccessKey();
       final formatStr = prefs.getString('download_audio_format') ?? 'm4a';
       final qualityStr = prefs.getString('download_audio_quality') ?? 'high';
 
@@ -145,13 +146,14 @@ class StandaloneDownloader {
       final targetPath = p.join(targetFolder.path, sanitizedFilename);
 
       // ── SERVIDOR BACKEND (Prioridade Absoluta) ─────────────────────────────
-      // Primeiro o servidor escolhido em Configurações; depois o do PietroTy e o último que funcionou.
-      const fixedProdUrl = 'https://laplayer-api.pietroty.com.br';
+      // O servidor de Configurações (ou o padrão da build); depois o último que funcionou.
       final candidateServerUrls = <String>{
-        if (serverUrl.trim().isNotEmpty) serverUrl.trim(),
-        fixedProdUrl,
+        if (serverUrl.isNotEmpty) serverUrl,
         if (_cachedWorkingServerUrl != null) _cachedWorkingServerUrl!,
       }.toList();
+      if (candidateServerUrls.isEmpty) {
+        throw Exception('Nenhum servidor configurado: preencha em Configurações → Servidor.');
+      }
 
       debugPrint('[StandaloneDownloader] Tentando ${candidateServerUrls.length} servidor(es): $candidateServerUrls');
 

@@ -40,7 +40,11 @@ server/slskd-data/
 # Whitelist distribution files & source code
 !.gitignore
 !README.md
-!server_url.txt
 
-# APK vai pra Release do GitHub (gh release create vX.Y.Z app-release.apk)
+# APK vai pra Release do GitHub (gh release create vX.Y.Z laplayer.apk; build_apk.sh)
 *.apk
+
+# Estado do servidor (estatística por chave, endereço do túnel): não é público
+server/key_stats.json
+server/key_downloads.log
+server_url.txt

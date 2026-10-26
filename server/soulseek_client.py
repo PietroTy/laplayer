@@ -19,7 +19,7 @@ from typing import Optional, List, Dict, Tuple
 
 # ── Configuration ────────────────────────────────────────────────────────────
 SLSKD_HOST = os.getenv("SLSKD_HOST", "http://127.0.0.1:5030")
-SLSKD_API_KEY = os.getenv("SLSKD_API_KEY") or os.getenv("SLSKD_KEY") or "laplayer-slskd-api-key-2026"
+SLSKD_API_KEY = os.getenv("SLSKD_API_KEY") or os.getenv("SLSKD_KEY")
 SLSKD_URL_BASE = "/api/v0"
 
 # Audio extensions ranked by quality preference (higher index = better)
@@ -45,13 +45,13 @@ class SoulseekDownloader:
     def __init__(self, host: str = None, api_key: str = None):
         h = host or os.getenv("SLSKD_HOST", "http://127.0.0.1:5030")
         self.host = h.rstrip("/")
-        self.api_key = api_key or os.getenv("SLSKD_API_KEY") or os.getenv("SLSKD_KEY") or "laplayer-slskd-api-key-2026"
+        self.api_key = api_key or os.getenv("SLSKD_API_KEY") or os.getenv("SLSKD_KEY")
         self.base = f"{self.host}{SLSKD_URL_BASE}"
         self._session = requests.Session()
         self._lock = threading.Lock()
 
     def _headers(self) -> dict:
-        key = self.api_key or os.getenv("SLSKD_API_KEY") or os.getenv("SLSKD_KEY") or "laplayer-slskd-api-key-2026"
+        key = self.api_key or os.getenv("SLSKD_API_KEY") or os.getenv("SLSKD_KEY")
         return {
             "X-API-Key": key,
             "Content-Type": "application/json",

@@ -13,6 +13,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../core/constants.dart';
 import '../core/file_utils.dart';
+import '../core/server_config.dart';
 import '../core/theme.dart';
 import '../data/database/database.dart';
 import '../data/models/track.dart';
@@ -585,9 +586,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'De onde vêm a busca e os downloads. Vazio usa o servidor do PietroTy.',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                Text(
+                  defaultServerUrl.isEmpty
+                      ? 'De onde vêm a busca e os downloads: o endereço e a chave de acesso do seu servidor.'
+                      : 'De onde vêm a busca e os downloads. Vazio usa o servidor que veio no app.',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                 ),
                 const SizedBox(height: 12),
                 TextField(
