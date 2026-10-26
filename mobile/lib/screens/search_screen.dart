@@ -168,7 +168,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     height: 42,
                     decoration: BoxDecoration(
                       color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.zero,
                       border: Border.all(color: AppColors.border.withOpacity(0.4)),
                     ),
                     child: TextField(
@@ -622,7 +622,7 @@ class _ExternalSearchResultTile extends StatelessWidget {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.zero,
         child: imageUrl != null && imageUrl!.isNotEmpty
             ? CachedNetworkImage(
                 imageUrl: imageUrl!,
@@ -698,7 +698,7 @@ class _Placeholder extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               decoration: const BoxDecoration(
                 color: AppColors.surface,
-                shape: BoxShape.circle,
+                shape: BoxShape.rectangle,
               ),
               child: Icon(icon, size: 48, color: AppColors.accent),
             ),

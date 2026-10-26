@@ -151,7 +151,7 @@ class _RematchAudioSheetState extends ConsumerState<RematchAudioSheet> {
       height: MediaQuery.of(context).size.height * 0.85,
       decoration: const BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.zero),
       ),
       child: Column(
         children: [
@@ -163,7 +163,7 @@ class _RematchAudioSheetState extends ConsumerState<RematchAudioSheet> {
               height: 4,
               decoration: BoxDecoration(
                 color: AppColors.border,
-                borderRadius: BorderRadius.circular(2),
+                borderRadius: BorderRadius.zero,
               ),
             ),
           ),
@@ -215,7 +215,7 @@ class _RematchAudioSheetState extends ConsumerState<RematchAudioSheet> {
                       fillColor: AppColors.surfaceHigh,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.zero,
                         borderSide: BorderSide.none,
                       ),
                     ),
@@ -228,7 +228,7 @@ class _RematchAudioSheetState extends ConsumerState<RematchAudioSheet> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.accent,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   ),
                   child: const Icon(Icons.search_rounded, size: 20),
@@ -243,7 +243,7 @@ class _RematchAudioSheetState extends ConsumerState<RematchAudioSheet> {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: AppColors.surfaceHigh,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.zero,
                 border: Border.all(color: AppColors.accent.withOpacity(0.4)),
               ),
               child: Column(
@@ -285,10 +285,10 @@ class _RematchAudioSheetState extends ConsumerState<RematchAudioSheet> {
                           return Card(
                             color: AppColors.surfaceHigh,
                             margin: const EdgeInsets.only(bottom: 8),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                             child: ListTile(
                               leading: ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.zero,
                                 child: Stack(
                                   alignment: Alignment.center,
                                   children: [
@@ -305,7 +305,7 @@ class _RematchAudioSheetState extends ConsumerState<RematchAudioSheet> {
                                         right: 2,
                                         child: Container(
                                           padding: const EdgeInsets.all(2),
-                                          decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
+                                          decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.rectangle),
                                           child: const Icon(Icons.check, size: 10, color: Colors.white),
                                         ),
                                       ),
@@ -329,7 +329,7 @@ class _RematchAudioSheetState extends ConsumerState<RematchAudioSheet> {
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: AppColors.accent,
                                         foregroundColor: Colors.white,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                       ),
                                       child: const Text('Baixar esta', style: TextStyle(fontSize: 12)),

@@ -17,11 +17,9 @@ class SpotifySearchService {
 
   Future<String> _getServerUrl() async {
     final prefs = await SharedPreferences.getInstance();
-    final url = prefs.getString('server_url') ?? '';
-    if (url.isNotEmpty && url.contains('pietroty.com.br')) {
-      return url;
-    }
-    return 'https://laplayer-api.pietroty.com.br';
+    // O servidor escolhido em Configurações; sem nenhum, o do PietroTy.
+    final url = (prefs.getString('server_url') ?? '').trim();
+    return url.isNotEmpty ? url : 'https://laplayer-api.pietroty.com.br';
   }
 
   Future<String> _getAccessKey() async {

@@ -115,7 +115,7 @@ class _GlobalSyncBanner extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
           ClipRRect(
-            borderRadius: BorderRadius.circular(2),
+            borderRadius: BorderRadius.zero,
             child: LinearProgressIndicator(
               value: syncState.progress > 0 ? syncState.progress : null,
               backgroundColor: Colors.white10,

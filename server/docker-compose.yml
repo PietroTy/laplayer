@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  slskd:
+    image: slskd/slskd:latest
+    container_name: laplayer-slskd
+    restart: unless-stopped
+    ports:
+      - "5030:5030"     # Web UI + API
+      - "50300:50300"   # Soulseek network
+    environment:
+      - SLSKD_REMOTE_CONFIGURATION=true
+      - SLSKD_REMOTE_FILE_MANAGEMENT=true
+      - SLSKD_DOWNLOADS_DIR=/downloads
+      - SLSKD_INCOMPLETE_DIR=/incomplete
+      - SLSKD_SHARED_DIR=/shared
+      - SLSKD_SLSK_LISTEN_PORT=50300
+    volumes:
+      - ./slskd-data:/app               # Config (slskd.yml lives here)
+      - ./slskd-downloads:/downloads     # Completed downloads
+      - ./slskd-incomplete:/incomplete   # In-progress downloads
+      - ./slskd-shared:/shared           # Shared files (seeds yt-dlp downloads)
+    user: "${UID:-1000}:${GID:-1000}"

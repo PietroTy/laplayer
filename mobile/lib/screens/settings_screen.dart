@@ -33,6 +33,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _accessKeyCtrl = TextEditingController();
+  final _serverUrlCtrl = TextEditingController();
   final _downloadDirCtrl = TextEditingController();
 
   // ── Preferências de Download ────────────────────────────────────
@@ -77,6 +78,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     _accessKeyCtrl.text = prefs.getString('access_key') ?? '';
+    _serverUrlCtrl.text = prefs.getString('server_url') ?? '';
 
     final customPath = prefs.getString('custom_music_directory') ?? '';
     if (customPath.isNotEmpty) {
@@ -121,7 +123,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
         title: const Text('Atualizar formato das músicas?',
             style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold)),
         content: Text(
@@ -139,7 +141,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.accent,
               foregroundColor: Colors.black,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
             ),
             onPressed: () async {
               Navigator.pop(ctx);
@@ -403,6 +405,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _save() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('access_key', _accessKeyCtrl.text.trim());
+    await prefs.setString('server_url', _serverUrlCtrl.text.trim().replaceAll(RegExp(r'/+$'), ''));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -426,7 +429,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.zero,
               color: palette.bg,
               gradient: palette.bgGradient,
               border: Border.all(
@@ -455,7 +458,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     height: 20,
                     decoration: BoxDecoration(
                       color: palette.accent,
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.zero,
                       boxShadow: const [
                         BoxShadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1)),
                       ],
@@ -473,7 +476,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     height: 14,
                     decoration: BoxDecoration(
                       color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.zero,
                     ),
                   ),
                 ),
@@ -576,6 +579,37 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           const SizedBox(height: 20),
 
+          // ── Servidor ──────────────────────────────────────────────────────
+          _Section(
+            title: 'Servidor',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'De onde vêm a busca e os downloads. Vazio usa o servidor do PietroTy.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _serverUrlCtrl,
+                  keyboardType: TextInputType.url,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                  decoration: AppTheme.inputDecoration('https://seu-servidor.exemplo.com'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _accessKeyCtrl,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                  decoration: AppTheme.inputDecoration('Chave de acesso'),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton(onPressed: _save, child: const Text('Salvar')),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
           // 3. ── Qualidade e Armazenamento ───────────────────────────────────
           _Section(
             title: 'Qualidade de Áudio & Armazenamento',
@@ -604,7 +638,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       margin: const EdgeInsets.only(bottom: 8),
                       decoration: BoxDecoration(
                         color: isSelected ? AppColors.accent.withValues(alpha: 0.12) : AppColors.surfaceHigh,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.zero,
                         border: Border.all(
                           color: isSelected ? AppColors.accent : AppColors.border,
                           width: isSelected ? 1.5 : 1.0,
@@ -721,7 +755,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.zero,
                             side: const BorderSide(color: AppColors.border),
                           ),
                         ),
@@ -835,7 +869,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           side: const BorderSide(color: AppColors.border),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.zero,
                           ),
                         ),
                         onPressed: () async {
@@ -929,7 +963,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const Divider(color: AppColors.border, height: 1),
                 const SizedBox(height: 16),
                 const _InfoRow(label: 'App', value: AppConstants.appName),
-                const _InfoRow(label: 'Versão', value: '2.5.0'),
+                const _InfoRow(label: 'Versão', value: '2.6.0'),
                 const _InfoRow(
                   label: 'Tecnologia',
                   value: 'Flutter & Dart',
@@ -948,11 +982,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
                 const _InfoRow(
                   label: 'Desenvolvedor',
-                  value: 'PietroTy',
-                ),
-                const _InfoRow(
-                  label: 'Direitos',
-                  value: '© PietroTy. Todos os direitos reservados.',
+                  value: '@PietroTy',
                 ),
                 _InfoRowWithAction(
                   label: 'Site',
@@ -995,6 +1025,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
 
+          const SizedBox(height: 24),
+          // Assinatura, igual nos outros apps
+          const Center(child: Text('@PietroTy 2026', style: TextStyle(color: AppColors.textMuted, fontSize: 12))),
           const SizedBox(height: 40),
         ],
       ),
@@ -1006,6 +1039,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _accessKeyCtrl.dispose();
+    _serverUrlCtrl.dispose();
     _downloadDirCtrl.dispose();
     super.dispose();
   }
@@ -1024,7 +1058,7 @@ class _Section extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.zero,
         border: Border.all(color: AppColors.border),
       ),
       child: Column(
@@ -1101,7 +1135,7 @@ class _InfoRowWithAction extends StatelessWidget {
           Expanded(
             child: InkWell(
               onTap: onTap,
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.zero,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

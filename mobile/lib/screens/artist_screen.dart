@@ -1,14 +1,17 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../core/theme.dart';
 import '../data/database/database.dart';
-import '../data/models/player_state.dart' as app;
 import '../data/models/track.dart';
 import '../providers/player_provider.dart';
+import 'album_screen.dart';
+import 'widgets/collection_header.dart';
 import 'widgets/track_tile.dart';
 
+/// Página do artista: capa, números, os álbuns dele (cada um abre a página do álbum) e as músicas.
 class ArtistScreen extends ConsumerStatefulWidget {
   final String artistName;
 
@@ -19,7 +22,7 @@ class ArtistScreen extends ConsumerStatefulWidget {
 }
 
 class _ArtistScreenState extends ConsumerState<ArtistScreen> {
-  List<Track> _artistTracks = [];
+  List<Track> _tracks = [];
   bool _isLoading = true;
 
   @override
@@ -30,8 +33,9 @@ class _ArtistScreenState extends ConsumerState<ArtistScreen> {
 
   Future<void> _loadTracks() async {
     final tracks = await AppDatabase.instance.getTracksForArtist(widget.artistName);
+    if (!mounted) return;
     setState(() {
-      _artistTracks = tracks;
+      _tracks = tracks;
       _isLoading = false;
     });
   }
@@ -42,36 +46,26 @@ class _ArtistScreenState extends ConsumerState<ArtistScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: Text('Mesclar artista', style: TextStyle(color: AppColors.textPrimary)),
+        title: const Text('Mesclar artista', style: TextStyle(color: AppColors.textPrimary)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Digite o nome do artista com o qual deseja unificar "${widget.artistName}":',
-              style: TextStyle(color: AppColors.textSecond, fontSize: 13),
+              style: const TextStyle(color: AppColors.textSecond, fontSize: 13),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: textController,
-              style: TextStyle(color: AppColors.textPrimary),
-              decoration: const InputDecoration(
-                hintText: 'Nome do artista destino',
-                hintStyle: TextStyle(color: Colors.white38),
-              ),
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: AppTheme.inputDecoration('Nome do artista destino'),
             ),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
-            child: const Text('Mesclar', style: TextStyle(color: Colors.black)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Mesclar')),
         ],
       ),
     );
@@ -90,174 +84,124 @@ class _ArtistScreenState extends ConsumerState<ArtistScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final downloadedTracks = _artistTracks.where((t) => t.available).toList();
-    final coverArt = _artistTracks.firstWhere((t) => t.albumArtUrl != null, orElse: () => _artistTracks.isNotEmpty ? _artistTracks.first : Track(id: '', spotifyUri: '', title: '', artist: '', playlistId: '')).albumArtUrl;
+    final playable = _tracks.where((t) => t.available).toList();
+    final cover = _tracks.map((t) => t.albumArtUrl).firstWhere((u) => u != null, orElse: () => null);
+    final albums = _albumsOf(_tracks);
 
     return AppBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : CustomScrollView(
-              slivers: [
-                SliverAppBar(
-                  pinned: true,
-                  backgroundColor: AppColors.bg,
-                  elevation: 0,
-                  title: Text(
-                    widget.artistName,
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.merge_type_rounded),
+              tooltip: 'Mesclar artista',
+              onPressed: _showMergeDialog,
+            ),
+          ],
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: CollectionHeader(
+                      coverUrl: cover,
+                      placeholderIcon: Icons.person_rounded,
+                      kind: 'ARTISTA',
+                      title: widget.artistName,
+                      stats: '${collectionStats(_tracks, playable)} · ${albums.length} álbu${albums.length == 1 ? 'm' : 'ns'}',
+                      playable: playable,
                     ),
                   ),
-                  actions: [
-                    IconButton(
-                      icon: const Icon(Icons.merge_type_rounded, color: AppColors.textPrimary),
-                      tooltip: 'Mesclar Artista',
-                      onPressed: _showMergeDialog,
+                  if (albums.isNotEmpty) ...[
+                    const SliverToBoxAdapter(child: SectionLabel('ÁLBUNS')),
+                    SliverToBoxAdapter(
+                      child: SizedBox(
+                        height: 186,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          itemCount: albums.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 12),
+                          itemBuilder: (context, i) => _AlbumChip(album: albums[i]),
+                        ),
+                      ),
                     ),
                   ],
-                ),
-                SliverToBoxAdapter(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.bg,
-                    ),
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // 1. Centered square cover image
-                        Center(
-                          child: Container(
-                            width: 180,
-                            height: 180,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: AppColors.accent,
-                                width: 2.0,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppColors.accent.withOpacity(0.3),
-                                  blurRadius: 20,
-                                  spreadRadius: 2,
-                                )
-                              ],
-                            ),
-                            child: ClipOval(
-                              child: coverArt != null
-                                  ? CachedNetworkImage(
-                                      imageUrl: coverArt,
-                                      fit: BoxFit.cover,
-                                    )
-                                  : Container(color: AppColors.surface),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-
-                        // 2. Action Row: Stats & Green Circular Play/Shuffle Buttons
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            // Artist Stats info
-                            Expanded(
-                              child: Text(
-                                '${_artistTracks.length} músicas • ${downloadedTracks.length} baixadas',
-                                style: const TextStyle(
-                                  color: AppColors.textSecond,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                            // Spotify-style Green circular Play & Shuffle Buttons
-                            if (downloadedTracks.isNotEmpty)
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // Shuffle Play (Shuffle)
-                                  GestureDetector(
-                                    onTap: () => ref.read(playerProvider.notifier).playQueueWithShuffle(
-                                      downloadedTracks,
-                                      shuffleMode: app.ShuffleMode.random,
-                                    ),
-                                    child: Container(
-                                      width: 40,
-                                      height: 40,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(color: AppColors.accent, width: 1.5),
-                                        color: Colors.transparent,
-                                      ),
-                                      child: Center(
-                                        child: Icon(
-                                          Icons.shuffle_rounded,
-                                          size: 20,
-                                          color: AppColors.accent,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  // Standard Play
-                                  GestureDetector(
-                                    onTap: () => ref.read(playerProvider.notifier).playQueueWithShuffle(
-                                      downloadedTracks,
-                                      shuffleMode: app.ShuffleMode.off,
-                                    ),
-                                    child: Container(
-                                      width: 52,
-                                      height: 52,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: AppColors.accent,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: AppColors.accent.withOpacity(0.4),
-                                            blurRadius: 12,
-                                            offset: const Offset(0, 4),
-                                          ),
-                                        ],
-                                      ),
-                                      child: const Center(
-                                        child: Icon(
-                                          Icons.play_arrow_rounded,
-                                          size: 32,
-                                          color: Colors.black,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      final track = _artistTracks[index];
-                      return TrackTile(
-                        track: track,
-                        queue: _artistTracks,
-                        onTap: () {
-                          ref.read(playerProvider.notifier).playTrack(track, _artistTracks);
+                  const SliverToBoxAdapter(child: SectionLabel('MÚSICAS')),
+                  SliverPadding(
+                    padding: const EdgeInsets.only(bottom: 100),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final track = _tracks[index];
+                          return TrackTile(
+                            track: track,
+                            queue: _tracks,
+                            onTap: () => ref.read(playerProvider.notifier).playTrack(track, _tracks),
+                          );
                         },
-                      );
-                    },
-                    childCount: _artistTracks.length,
+                        childCount: _tracks.length,
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _ArtistAlbum {
+  final String name;
+  final String artist;
+  final String? cover;
+  final String year;
+  int count = 0;
+  _ArtistAlbum(this.name, this.artist, this.cover, this.year);
+}
+
+/// Álbuns das faixas do artista, do mais novo para o mais antigo.
+List<_ArtistAlbum> _albumsOf(List<Track> tracks) {
+  final byName = <String, _ArtistAlbum>{};
+  for (final t in tracks) {
+    if (t.album.isEmpty) continue;
+    final a = byName.putIfAbsent(t.album.toLowerCase(), () => _ArtistAlbum(t.album, albumArtistOf(t), t.albumArtUrl, t.releaseYear));
+    a.count++;
+  }
+  return byName.values.toList()..sort((a, b) => b.year.compareTo(a.year));
+}
+
+class _AlbumChip extends StatelessWidget {
+  final _ArtistAlbum album;
+  const _AlbumChip({required this.album});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => context.push(albumRoute(album.name, album.artist)),
+      child: SizedBox(
+        width: 130,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 130,
+              height: 130,
+              decoration: BoxDecoration(color: AppColors.surface, border: Border.all(color: AppColors.border)),
+              child: album.cover != null
+                  ? CachedNetworkImage(imageUrl: album.cover!, fit: BoxFit.cover, memCacheWidth: 260)
+                  : const Icon(Icons.album_rounded, color: AppColors.textMuted, size: 40),
             ),
+            const SizedBox(height: 6),
+            Text(album.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w700)),
+            Text([if (album.year.isNotEmpty) album.year, '${album.count} música${album.count == 1 ? '' : 's'}'].join(' · '),
+                maxLines: 1, style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+          ],
+        ),
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'album_screen.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -157,11 +158,11 @@ class PlayerScreen extends ConsumerWidget {
                                 aspectRatio: 1,
                                 child: Container(
                                   decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(24),
+                                    borderRadius: BorderRadius.zero,
                                     boxShadow: AppColors.premiumShadow,
                                   ),
                                   child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(24),
+                                    borderRadius: BorderRadius.zero,
                                     child: track.albumArtUrl != null
                                         ? CachedNetworkImage(
                                             imageUrl: track.albumArtUrl!,
@@ -201,7 +202,7 @@ class PlayerScreen extends ConsumerWidget {
                       GestureDetector(
                         onTap: () {
                           context.pop();
-                          context.push('/artist/${Uri.encodeComponent(track.artist)}');
+                          context.push(artistRoute(track.artistNames.isNotEmpty ? track.artistNames.first : track.artist));
                         },
                         child: Text(
                           track.artist,
@@ -296,7 +297,7 @@ class PlayerScreen extends ConsumerWidget {
                           height: state.isPlaying ? 74 : 80,
                           decoration: BoxDecoration(
                             color: palette.accent,
-                            shape: BoxShape.circle,
+                            shape: BoxShape.rectangle,
                             boxShadow: [
                               BoxShadow(
                                 color: palette.accent.withValues(alpha: 0.35),
@@ -361,7 +362,7 @@ class PlayerScreen extends ConsumerWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         decoration: BoxDecoration(
                           color: palette.accent.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(20),
+                          borderRadius: BorderRadius.zero,
                           border: Border.all(color: palette.accent.withValues(alpha: 0.35)),
                         ),
                         child: Text(
@@ -400,7 +401,7 @@ class PlayerScreen extends ConsumerWidget {
       context: context,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.zero),
       ),
       builder: (_) => SafeArea(
         child: Column(
@@ -411,7 +412,7 @@ class PlayerScreen extends ConsumerWidget {
               width: 40, height: 4,
               decoration: BoxDecoration(
                 color: AppColors.border,
-                borderRadius: BorderRadius.circular(2),
+                borderRadius: BorderRadius.zero,
               ),
             ),
             const SizedBox(height: 16),
@@ -600,7 +601,7 @@ class _LyricsSheetState extends ConsumerState<_LyricsSheet> {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.bg,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.zero),
       ),
       child: Column(
         children: [
@@ -609,7 +610,7 @@ class _LyricsSheetState extends ConsumerState<_LyricsSheet> {
             width: 40, height: 4,
             decoration: BoxDecoration(
               color: Colors.white24,
-              borderRadius: BorderRadius.circular(2),
+              borderRadius: BorderRadius.zero,
             ),
           ),
           Padding(
@@ -774,12 +775,12 @@ class _LyricsSheetState extends ConsumerState<_LyricsSheet> {
                     playerNotifier.seek(line.timestamp!);
                   }
                 : null,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.zero,
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.zero,
                 color: isActive ? AppColors.accent.withOpacity(0.05) : Colors.transparent,
               ),
               child: Text(
@@ -849,7 +850,7 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
       return Container(
         decoration: BoxDecoration(
           color: AppColors.bg,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          borderRadius: BorderRadius.vertical(top: Radius.zero),
         ),
         child: const Center(child: Text('Fila vazia', style: TextStyle(color: Colors.white))),
       );
@@ -872,7 +873,7 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.bg,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.zero),
       ),
       child: Column(
         children: [
@@ -881,7 +882,7 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
             width: 40, height: 4,
             decoration: BoxDecoration(
               color: Colors.white24,
-              borderRadius: BorderRadius.circular(2),
+              borderRadius: BorderRadius.zero,
             ),
           ),
           Padding(
@@ -930,7 +931,7 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
                             child: ListTile(
                               contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
                               leading: ClipRRect(
-                                borderRadius: BorderRadius.circular(4),
+                                borderRadius: BorderRadius.zero,
                                 child: track.albumArtUrl != null
                                     ? CachedNetworkImage(
                                         imageUrl: track.albumArtUrl!,
@@ -961,7 +962,7 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
                     contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                     tileColor: AppColors.surface,
                     leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.zero,
                       child: currentTrack.albumArtUrl != null
                           ? CachedNetworkImage(
                               imageUrl: currentTrack.albumArtUrl!,
@@ -1001,7 +1002,7 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
                           child: ListTile(
                             contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                             leading: ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
+                              borderRadius: BorderRadius.zero,
                               child: track.albumArtUrl != null
                                   ? CachedNetworkImage(
                                       imageUrl: track.albumArtUrl!,

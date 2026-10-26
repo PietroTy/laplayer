@@ -215,7 +215,7 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
                 backgroundColor: AppColors.accent,
                 foregroundColor: Colors.black,
                 minimumSize: const Size.fromHeight(50),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
               ),
               child: const Text('CRIAR PLAYLIST',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
@@ -305,7 +305,7 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
                       backgroundColor: const Color(0xFF1DB954),
                       foregroundColor: Colors.black,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(25)),
+                          borderRadius: BorderRadius.zero),
                     ),
                     child: const Text('SINCRONIZAR PLAYLIST',
                         style: TextStyle(fontWeight: FontWeight.bold)),
@@ -340,10 +340,10 @@ class _ChoiceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: AppColors.surface,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.zero,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.zero,
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Row(
@@ -352,7 +352,7 @@ class _ChoiceCard extends StatelessWidget {
                 width: 52, height: 52,
                 decoration: BoxDecoration(
                   color: iconColor.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.zero,
                 ),
                 child: Icon(icon, color: iconColor, size: 28),
               ),

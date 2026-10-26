@@ -145,17 +145,13 @@ class StandaloneDownloader {
       final targetPath = p.join(targetFolder.path, sanitizedFilename);
 
       // ── SERVIDOR BACKEND (Prioridade Absoluta) ─────────────────────────────
+      // Primeiro o servidor escolhido em Configurações; depois o do PietroTy e o último que funcionou.
       const fixedProdUrl = 'https://laplayer-api.pietroty.com.br';
-      final candidateServerUrls = <String>[fixedProdUrl];
-
-      // Adiciona URL em cache se já funcionou antes (e for diferente da produção)
-      if (_cachedWorkingServerUrl != null && !candidateServerUrls.contains(_cachedWorkingServerUrl)) {
-        candidateServerUrls.add(_cachedWorkingServerUrl!);
-      }
-      // Adiciona URL das prefs apenas se for diferente da produção
-      if (serverUrl.isNotEmpty && !candidateServerUrls.contains(serverUrl)) {
-        candidateServerUrls.add(serverUrl);
-      }
+      final candidateServerUrls = <String>{
+        if (serverUrl.trim().isNotEmpty) serverUrl.trim(),
+        fixedProdUrl,
+        if (_cachedWorkingServerUrl != null) _cachedWorkingServerUrl!,
+      }.toList();
 
       debugPrint('[StandaloneDownloader] Tentando ${candidateServerUrls.length} servidor(es): $candidateServerUrls');
 

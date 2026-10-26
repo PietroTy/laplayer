@@ -113,7 +113,7 @@ class _PlaylistTile extends ConsumerWidget {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 6),
       leading: ClipRRect(
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.zero,
         child: playlist.imageUrl.isNotEmpty
             ? CachedNetworkImage(
                 imageUrl: playlist.imageUrl,
@@ -156,7 +156,7 @@ class _PlaylistTile extends ConsumerWidget {
             backgroundColor: AppColors.border,
             color: playlist.isComplete ? AppColors.accent : AppColors.accentDim,
             minHeight: 2,
-            borderRadius: BorderRadius.circular(2),
+            borderRadius: BorderRadius.zero,
           ),
         ],
       ),
@@ -180,14 +180,14 @@ class _PlaylistTile extends ConsumerWidget {
           context: context,
           backgroundColor: AppColors.surface,
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            borderRadius: BorderRadius.vertical(top: Radius.zero),
           ),
           builder: (context) => SafeArea(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const SizedBox(height: 8),
-                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.zero)),
                 Padding(
                   padding: const EdgeInsets.all(20),
                   child: Text('Playlist: ${playlist.name}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -225,7 +225,7 @@ class _PlaylistTile extends ConsumerWidget {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
         title: Row(
           children: [
             Icon(Icons.sync_rounded, color: AppColors.accent),
@@ -253,7 +253,7 @@ class _PlaylistTile extends ConsumerWidget {
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.accent,
               foregroundColor: Colors.black,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
             ),
             onPressed: () {
               Navigator.pop(context);

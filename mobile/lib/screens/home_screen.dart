@@ -116,7 +116,7 @@ class HomeScreen extends ConsumerWidget {
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: AppColors.glassSurface,
-                          borderRadius: BorderRadius.circular(24),
+                          borderRadius: BorderRadius.zero,
                           border: Border.all(color: AppColors.border.withValues(alpha: 0.5)),
                           boxShadow: AppColors.premiumShadow,
                         ),
@@ -157,7 +157,7 @@ class HomeScreen extends ConsumerWidget {
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                       decoration: BoxDecoration(
                                         color: AppColors.surfaceHigh,
-                                        borderRadius: BorderRadius.circular(12),
+                                        borderRadius: BorderRadius.zero,
                                         border: Border.all(color: AppColors.border, width: 0.8),
                                       ),
                                       child: Row(
@@ -321,7 +321,7 @@ class HomeScreen extends ConsumerWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.glassSurface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.zero,
         border: Border.all(color: AppColors.border.withValues(alpha: 0.5)),
         boxShadow: AppColors.premiumShadow,
       ),
@@ -358,7 +358,7 @@ class HomeScreen extends ConsumerWidget {
       onTap: () {
         ref.read(playerProvider.notifier).playQueue(queue, startIndex: rank - 1);
       },
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.zero,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
         child: Row(
@@ -368,7 +368,7 @@ class HomeScreen extends ConsumerWidget {
               height: 24,
               decoration: BoxDecoration(
                 color: rank == 1 ? AppColors.accent : AppColors.surfaceHigh,
-                shape: BoxShape.circle,
+                shape: BoxShape.rectangle,
               ),
               child: Center(
                 child: Text(
@@ -383,7 +383,7 @@ class HomeScreen extends ConsumerWidget {
             ),
             const SizedBox(width: 12),
             ClipRRect(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.zero,
               child: track.albumArtUrl != null
                   ? CachedNetworkImage(
                       imageUrl: track.albumArtUrl!,
@@ -431,7 +431,7 @@ class HomeScreen extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: AppColors.accent.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.zero,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -508,14 +508,14 @@ class _PlaylistCard extends ConsumerWidget {
           context: context,
           backgroundColor: AppColors.surface,
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            borderRadius: BorderRadius.vertical(top: Radius.zero),
           ),
           builder: (context) => SafeArea(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const SizedBox(height: 8),
-                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.zero)),
                 Padding(
                   padding: const EdgeInsets.all(20),
                   child: Text('Playlist: ${playlist.name}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -542,7 +542,7 @@ class _PlaylistCard extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.zero,
               child: Container(
                 width: 130, height: 130,
                 decoration: const BoxDecoration(
@@ -566,7 +566,7 @@ class _PlaylistCard extends ConsumerWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.65),
-                          borderRadius: BorderRadius.circular(20),
+                          borderRadius: BorderRadius.zero,
                         ),
                         child: Text(
                           '${playlist.downloaded}/${playlist.totalTracks}',
@@ -699,7 +699,7 @@ class _PlaylistSkeleton extends StatelessWidget {
             margin: const EdgeInsets.only(right: 12),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.zero,
             ),
           ),
         ),
@@ -722,7 +722,7 @@ class _TrackSkeleton extends StatelessWidget {
               width: 44, height: 44,
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.zero,
               ),
               child: const SizedBox(),
             ),

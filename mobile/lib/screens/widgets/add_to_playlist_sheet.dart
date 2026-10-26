@@ -86,7 +86,7 @@ class _AddToPlaylistSheetState extends ConsumerState<AddToPlaylistSheet> {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.bg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: const BorderRadius.vertical(top: Radius.zero),
       ),
       padding: EdgeInsets.only(
         top: 20,
@@ -102,7 +102,7 @@ class _AddToPlaylistSheetState extends ConsumerState<AddToPlaylistSheet> {
             children: [
               if (widget.track.albumArtUrl != null) ...[
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.zero,
                   child: Image.network(widget.track.albumArtUrl!, width: 48, height: 48, fit: BoxFit.cover),
                 ),
                 const SizedBox(width: 12),
@@ -171,7 +171,7 @@ class _AddToPlaylistSheetState extends ConsumerState<AddToPlaylistSheet> {
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: p.imageUrl.isNotEmpty
-                          ? ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(p.imageUrl, width: 40, height: 40, fit: BoxFit.cover))
+                          ? ClipRRect(borderRadius: BorderRadius.zero, child: Image.network(p.imageUrl, width: 40, height: 40, fit: BoxFit.cover))
                           : Container(width: 40, height: 40, color: AppColors.surfaceHigh, child: const Icon(Icons.queue_music_rounded, color: AppColors.textMuted)),
                       title: Text(p.name, style: const TextStyle(color: Colors.white)),
                       subtitle: Text('${p.totalTracks} músicas', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),

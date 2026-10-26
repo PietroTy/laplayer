@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -237,7 +240,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                 thumbVisibility: true,
                 thickness: 12,
                 padding: const EdgeInsets.only(top: 100, bottom: 100, right: 2),
-                radius: const Radius.circular(6),
+                radius: Radius.zero,
                 thumbColor: AppColors.accent.withOpacity(0.7),
                 interactive: true,
                 child: CustomScrollView(
@@ -257,6 +260,12 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                       ),
                     ),
                     actions: [
+                      if (playlistDetails != null)
+                        IconButton(
+                          tooltip: 'Exportar JSON',
+                          icon: const Icon(Icons.data_object_rounded, color: AppColors.textPrimary),
+                          onPressed: () => _exportJson(context, playlistDetails),
+                        ),
                       if (playlistDetails != null)
                         IconButton(
                           tooltip: 'Editar Playlist',
@@ -308,7 +317,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                                   fillColor: AppColors.surface,
                                   contentPadding: EdgeInsets.zero,
                                   border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
+                                    borderRadius: BorderRadius.zero,
                                     borderSide: BorderSide.none,
                                   ),
                                 ),
@@ -376,14 +385,14 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                               width: 180,
                               height: 180,
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.zero,
                                 border: Border.all(
                                   color: Colors.black,
                                   width: 2.0,
                                 ),
                               ),
                               child: ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.zero,
                                 child: playlistDetails != null && playlistDetails.imageUrl.isNotEmpty
                                     ? CachedNetworkImage(
                                         imageUrl: playlistDetails.imageUrl,
@@ -425,7 +434,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                                   ),
                                   const SizedBox(height: 6),
                                   ClipRRect(
-                                    borderRadius: BorderRadius.circular(2),
+                                    borderRadius: BorderRadius.zero,
                                     child: LinearProgressIndicator(
                                       value: syncState.progress > 0 ? syncState.progress : null,
                                       backgroundColor: Colors.white10,
@@ -467,7 +476,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                                         width: 40,
                                         height: 40,
                                         decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
+                                          shape: BoxShape.rectangle,
                                           border: Border.all(color: AppColors.accent, width: 1.5),
                                           color: Colors.transparent,
                                         ),
@@ -491,7 +500,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                                         width: 48,
                                         height: 48,
                                         decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
+                                          shape: BoxShape.rectangle,
                                           color: AppColors.accent,
                                         ),
                                         child: const Center(
@@ -647,7 +656,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
         title: Row(
           children: [
             Icon(Icons.sync_rounded, color: AppColors.accent),
@@ -675,7 +684,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.accent,
               foregroundColor: Colors.black,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
             ),
             onPressed: () {
               Navigator.pop(ctx);
@@ -699,6 +708,32 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
         ),
       );
 
+  // Salva a playlist (dados e faixas) num arquivo .json escolhido pelo usuário.
+  Future<void> _exportJson(BuildContext context, Playlist playlist) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final json = await ManifestService.instance.playlistJson(playlist);
+      final safeName = playlist.name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Salvar playlist',
+        fileName: '${safeName.isEmpty ? 'playlist' : safeName}.json',
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        bytes: Uint8List.fromList(utf8.encode(json)),
+      );
+      if (path == null) return; // cancelou
+      messenger.showSnackBar(SnackBar(
+        content: const Text('Playlist exportada em JSON'),
+        backgroundColor: AppColors.accent,
+      ));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('Não deu para exportar: $e'),
+        backgroundColor: AppColors.error,
+      ));
+    }
+  }
+
   void _showEditPlaylistDialog(BuildContext context, Playlist playlist) {
     final nameController = TextEditingController(text: playlist.name);
     final descController = TextEditingController(text: playlist.description);
@@ -712,7 +747,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
           builder: (context, setDialogState) {
             return AlertDialog(
               backgroundColor: AppColors.surface,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
               title: const Text(
                 'Editar Playlist',
                 style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
@@ -734,7 +769,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                         filled: true,
                         fillColor: AppColors.bg,
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.zero,
                           borderSide: BorderSide.none,
                         ),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -754,7 +789,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                         filled: true,
                         fillColor: AppColors.bg,
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.zero,
                           borderSide: BorderSide.none,
                         ),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -772,7 +807,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                         filled: true,
                         fillColor: AppColors.bg,
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.zero,
                           borderSide: BorderSide.none,
                         ),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -817,7 +852,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen>
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.accent,
                     foregroundColor: Colors.black,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                   ),
                   onPressed: () async {
                     final name = nameController.text.trim();
@@ -864,7 +899,7 @@ class _TrackPlaceholder extends StatelessWidget {
       height: 72, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
-          Container(width: 52, height: 52, decoration: BoxDecoration(color: AppColors.surfaceHigh, borderRadius: BorderRadius.circular(4))),
+          Container(width: 52, height: 52, decoration: BoxDecoration(color: AppColors.surfaceHigh, borderRadius: BorderRadius.zero)),
           const SizedBox(width: 16),
           Expanded(
             child: Column(

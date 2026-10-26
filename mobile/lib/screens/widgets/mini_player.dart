@@ -30,13 +30,13 @@ class MiniPlayer extends ConsumerWidget {
       child: GestureDetector(
         onTap: () => context.push('/player'),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.zero,
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
             child: Container(
               decoration: BoxDecoration(
                 color: AppColors.glassSurfaceHigh,
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.zero,
                 border: Border.all(color: AppColors.border.withValues(alpha: 0.5)),
                 boxShadow: AppColors.premiumShadow,
               ),
@@ -72,13 +72,13 @@ class MiniPlayer extends ConsumerWidget {
                                 child: Container(
                                   width: 44, height: 44,
                                   decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(12),
+                                    borderRadius: BorderRadius.zero,
                                     boxShadow: [
                                       BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 4))
                                     ],
                                   ),
                                   child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
+                                    borderRadius: BorderRadius.zero,
                                     child: track.albumArtUrl != null
                                         ? CachedNetworkImage(
                                             imageUrl: track.albumArtUrl!,
@@ -139,7 +139,7 @@ class MiniPlayer extends ConsumerWidget {
                             height: 40,
                             decoration: BoxDecoration(
                               color: isPlaying ? AppColors.accent : Colors.white10,
-                              shape: BoxShape.circle,
+                              shape: BoxShape.rectangle,
                             ),
                             child: isLoading
                                 ? const Padding(
@@ -185,7 +185,7 @@ class _ArtPlaceholder extends StatelessWidget {
       width: size, height: size,
       decoration: BoxDecoration(
         color: AppColors.surfaceHigh,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.zero,
       ),
       child: const Icon(Icons.music_note_rounded, color: AppColors.textMuted, size: 20),
     );

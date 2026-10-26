@@ -56,6 +56,29 @@ class Track {
 
   // ── Utilitários ────────────────────────────────────────────────────────
 
+  /// Cada artista da faixa separado ("A, B" vira ["A", "B"]). O campo `artist` junta os nomes do
+  /// Spotify com ", "; o principal vem primeiro e é mantido inteiro mesmo se tiver vírgula no nome.
+  List<String> get artistNames => splitArtists(artist, primaryArtist);
+
+  static List<String> splitArtists(String artist, String primaryArtist) {
+    final names = <String>[];
+    var rest = artist.trim();
+    final primary = primaryArtist.trim();
+    if (primary.isNotEmpty) {
+      names.add(primary);
+      if (rest == primary) {
+        rest = '';
+      } else if (rest.startsWith('$primary, ')) {
+        rest = rest.substring(primary.length + 2);
+      }
+    }
+    for (final n in rest.split(', ')) {
+      final name = n.trim();
+      if (name.isNotEmpty && !names.any((e) => e.toLowerCase() == name.toLowerCase())) names.add(name);
+    }
+    return names;
+  }
+
   /// Duração formatada (ex: "3:45")
   String get durationFormatted {
     final total = Duration(milliseconds: durationMs);

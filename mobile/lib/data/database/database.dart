@@ -509,59 +509,75 @@ class AppDatabase {
     }
   }
 
+  // Artistas saem do campo `artist` separado por pessoa: uma faixa "A, B" conta para A e para B.
+  // Por isso o agrupamento é feito aqui, não no GROUP BY.
   Future<List<ArtistGroup>> searchArtists(String query, {String? playlistId, int? limit = 60}) async {
     final database = await db;
     final q = '%$query%';
     final whereClause = playlistId != null
         ? 'AND (t.playlist_id = ? OR t.id IN (SELECT track_id FROM playlist_tracks WHERE playlist_id = ?))'
         : '';
-    final limitClause = limit != null ? 'LIMIT ?' : '';
     final List<Object> args = playlistId != null ? [q, q, q, playlistId, playlistId] : [q, q, q];
-    if (limit != null) args.add(limit);
 
     final rows = await database.rawQuery('''
-      SELECT
-        COALESCE(NULLIF(t.primary_artist, ''), NULLIF(t.artist, ''), 'Artista Desconhecido') as artist_name,
-        t.album_art_url,
-        COUNT(*) as total_tracks,
-        SUM(COALESCE(t.is_cached, 0)) as downloaded_tracks,
-        COUNT(DISTINCT t.album) as album_count
+      SELECT t.artist, t.primary_artist, t.title, t.album, t.album_art_url, t.is_cached
       FROM tracks t
       WHERE (t.artist LIKE ? OR t.primary_artist LIKE ? OR t.title LIKE ?)
-        AND (COALESCE(NULLIF(t.primary_artist, ''), NULLIF(t.artist, ''), '') != '')
         $whereClause
-      GROUP BY COALESCE(NULLIF(t.primary_artist, ''), NULLIF(t.artist, ''), 'Artista Desconhecido')
-      ORDER BY artist_name ASC
-      $limitClause
     ''', args);
-    return rows.map((r) => ArtistGroup(
-      name: r['artist_name'] as String? ?? '',
-      coverArtUrl: r['album_art_url'] as String?,
-      totalTracks: (r['total_tracks'] as num?)?.toInt() ?? 0,
-      downloadedTracks: (r['downloaded_tracks'] as num?)?.toInt() ?? 0,
-      albumCount: (r['album_count'] as num?)?.toInt() ?? 0,
+
+    final needle = query.toLowerCase();
+    final groups = <String, _ArtistAcc>{};
+    for (final r in rows) {
+      final names = Track.splitArtists(r['artist'] as String? ?? '', r['primary_artist'] as String? ?? '');
+      final titleHit = needle.isNotEmpty && (r['title'] as String? ?? '').toLowerCase().contains(needle);
+      for (final name in names) {
+        // Na busca, só entra o artista que bate com o texto (ou todos, se o texto bateu no título).
+        if (needle.isNotEmpty && !titleHit && !name.toLowerCase().contains(needle)) continue;
+        final key = name.toLowerCase();
+        final acc = groups.putIfAbsent(key, () => _ArtistAcc(name));
+        acc.total++;
+        if ((r['is_cached'] as num? ?? 0) != 0) acc.downloaded++;
+        acc.albums.add(r['album'] as String? ?? '');
+        acc.cover ??= r['album_art_url'] as String?;
+      }
+    }
+    final list = groups.values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final limited = limit != null && list.length > limit ? list.sublist(0, limit) : list;
+    return limited.map((a) => ArtistGroup(
+      name: a.name,
+      coverArtUrl: a.cover,
+      totalTracks: a.total,
+      downloadedTracks: a.downloaded,
+      albumCount: a.albums.length,
     )).toList();
   }
 
   Future<List<Track>> getTracksForArtist(String artistName, {String? playlistId}) async {
     final database = await db;
+    final like = '%$artistName%';
+    final List<Map<String, Object?>> rows;
     if (playlistId != null) {
-      final rows = await database.rawQuery('''
+      rows = await database.rawQuery('''
         SELECT t.* FROM tracks t
         LEFT JOIN playlist_tracks pt ON t.id = pt.track_id
-        WHERE (t.primary_artist = ? OR t.artist = ?) AND (t.playlist_id = ? OR pt.playlist_id = ?)
+        WHERE (t.primary_artist LIKE ? OR t.artist LIKE ?) AND (t.playlist_id = ? OR pt.playlist_id = ?)
         GROUP BY t.id
         ORDER BY t.album ASC, t.track_number ASC
-      ''', [artistName, artistName, playlistId, playlistId]);
-      return rows.map(_rowToTrack).toList();
+      ''', [like, like, playlistId, playlistId]);
     } else {
-      final rows = await database.rawQuery('''
+      rows = await database.rawQuery('''
         SELECT t.* FROM tracks t
-        WHERE (t.primary_artist = ? OR t.artist = ?)
+        WHERE (t.primary_artist LIKE ? OR t.artist LIKE ?)
         ORDER BY t.album ASC, t.track_number ASC
-      ''', [artistName, artistName]);
-      return rows.map(_rowToTrack).toList();
+      ''', [like, like]);
     }
+    // O LIKE só pré-filtra; vale quem tem esse artista na lista (não "Ana" dentro de "Anavitória").
+    final key = artistName.toLowerCase();
+    return rows.map(_rowToTrack)
+        .where((t) => t.artistNames.any((n) => n.toLowerCase() == key))
+        .toList();
   }
 
   /// Atualiza explicitamente o status de cache (podendo setar para false/0).
@@ -881,4 +897,13 @@ class AppDatabase {
       isCached:         (row['is_cached'] ?? 0) == 1,
     );
   }
+}
+
+class _ArtistAcc {
+  final String name;
+  int total = 0;
+  int downloaded = 0;
+  final Set<String> albums = {};
+  String? cover;
+  _ArtistAcc(this.name);
 }

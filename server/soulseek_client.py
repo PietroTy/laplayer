@@ -11,6 +11,7 @@ The slskd instance must be running (Docker) and accessible at SLSKD_HOST.
 import os
 import re
 import time
+import unicodedata
 import shutil
 import threading
 import requests
@@ -290,8 +291,14 @@ class SoulseekDownloader:
             print(f"[Soulseek] Timeout aguardando download de '{filename}'")
             return None
 
-        # 3. Find the downloaded file and copy to target
-        downloaded_file = self._find_downloaded_file(username, filename)
+        # 3. Find the downloaded file and copy to target. O slskd marca "Succeeded" antes de mover o
+        # arquivo da pasta incomplete para a de downloads, então espera um pouco por ele.
+        downloaded_file = None
+        for _ in range(20):
+            downloaded_file = self._find_downloaded_file(username, filename)
+            if downloaded_file:
+                break
+            time.sleep(0.5)
         if not downloaded_file:
             print("[Soulseek] Arquivo baixado não encontrado no diretório de downloads")
             return None
@@ -518,13 +525,13 @@ class SoulseekDownloader:
         if not os.path.isdir(downloads_dir):
             return None
 
-        # Extract just the filename from the Soulseek path
-        target_name = filename.replace("\\", "/").split("/")[-1]
+        # Extract just the filename from the Soulseek path (acentos comparados na mesma forma Unicode)
+        target_name = unicodedata.normalize("NFC", filename.replace("\\", "/").split("/")[-1])
 
         # Walk the downloads directory looking for the file
         for root, dirs, files in os.walk(downloads_dir):
             for f in files:
-                if f == target_name:
+                if unicodedata.normalize("NFC", f) == target_name:
                     full_path = os.path.join(root, f)
                     # Verify file has content
                     if os.path.getsize(full_path) > 1024:

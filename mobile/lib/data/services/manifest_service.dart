@@ -24,6 +24,19 @@ class ManifestService {
 
   // ── Export ────────────────────────────────────────────────────────────────
 
+  /// JSON de uma playlist só, para guardar ou levar a outro lugar: a playlist e as faixas
+  /// (sem as configurações nem a chave de acesso, que ficam só no manifesto geral).
+  Future<String> playlistJson(Playlist playlist) async {
+    final tracks = await AppDatabase.instance.getTracksForPlaylist(playlist.id);
+    // Compacto: uma playlist de 9 mil faixas fica com poucos MB.
+    return jsonEncode({
+      'version': _currentVersion,
+      'exported_at': DateTime.now().toIso8601String(),
+      'playlist': playlist.toJson(),
+      'tracks': tracks.map((t) => t.toJson()).toList(),
+    });
+  }
+
   /// Salva o manifesto imediatamente. Use [scheduleSave] para debounce automático.
   Future<File?> saveNow() async {
     try {

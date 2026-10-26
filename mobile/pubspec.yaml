@@ -1,7 +1,7 @@
 name: la_player
 description: Offline-first music player with Spotify library sync.
 publish_to: 'none'
-version: 1.1.4+6
+version: 2.6.0+7
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -31,7 +31,6 @@ dependencies:
   # ── UI / Assets ────────────────────────────────────────────────────────
   cached_network_image: ^3.3.1     # Cache de imagens
   flutter_cache_manager: ^3.3.1    # Gerenciador de cache
-  google_fonts: ^6.2.1             # Tipografia
   shimmer: ^3.0.0                  # Loading skeleton
 
   # ── Navegação ──────────────────────────────────────────────────────────
@@ -64,6 +63,10 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: Monocraft             # a mesma fonte pixel do Calcite, do Amethist e do portfólio
+      fonts:
+        - asset: assets/fonts/Monocraft.ttf
   assets:
     - assets/app_logo_clean.png
     - assets/app_logo_glyph.png

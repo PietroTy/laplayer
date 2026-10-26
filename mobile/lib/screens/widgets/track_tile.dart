@@ -87,7 +87,7 @@ class _TrackTileState extends ConsumerState<TrackTile> {
             border: widget.isHighlighted
                 ? Border.all(color: AppColors.accent.withOpacity(0.3))
                 : null,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.zero,
           ),
           child: Opacity(
           opacity: isDownloaded ? 1.0 : (isDownloading ? 0.7 : 0.4), // Opacidade dinâmica
@@ -140,7 +140,7 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                             decoration: BoxDecoration(
                               color: AppColors.textMuted,
-                              borderRadius: BorderRadius.circular(3),
+                              borderRadius: BorderRadius.zero,
                             ),
                             child: const Text('E',
                               style: TextStyle(color: Colors.black, fontSize: 9, fontWeight: FontWeight.w800),
@@ -185,7 +185,7 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                               height: 18,
                               decoration: BoxDecoration(
                                 color: AppColors.accent,
-                                shape: BoxShape.circle,
+                                shape: BoxShape.rectangle,
                               ),
                               child: const Icon(
                                 Icons.check_rounded,
@@ -219,7 +219,7 @@ class _TrackTileState extends ConsumerState<TrackTile> {
                                     height: 18,
                                     decoration: BoxDecoration(
                                       color: AppColors.accent,
-                                      shape: BoxShape.circle,
+                                      shape: BoxShape.rectangle,
                                     ),
                                     child: const Icon(
                                       Icons.arrow_downward_rounded,
@@ -282,7 +282,7 @@ class _AlbumArt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.zero,
       child: url != null
           ? CachedNetworkImage(
               imageUrl:   url!,
@@ -342,7 +342,7 @@ class _PlayingIndicatorState extends State<_PlayingIndicator>
                 margin: const EdgeInsets.symmetric(horizontal: 1.5),
                 decoration: BoxDecoration(
                   color: AppColors.accent,
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.zero,
                   boxShadow: widget.isPlaying ? [
                     BoxShadow(color: AppColors.accent.withValues(alpha: 0.5), blurRadius: 4, spreadRadius: 1)
                   ] : [],
@@ -370,7 +370,7 @@ class _TrackMenu extends ConsumerWidget {
       icon: const Icon(Icons.more_vert_rounded, size: 18, color: AppColors.textMuted),
       padding: EdgeInsets.zero,
       color: AppColors.surfaceHigh,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       onSelected: (action) => _handleAction(context, ref, action),
       itemBuilder: (_) => [
         PopupMenuItem(
@@ -475,7 +475,7 @@ class _TrackMenu extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
         title: const Text('Remover da Playlist',
             style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
         content: Text(
@@ -491,7 +491,7 @@ class _TrackMenu extends ConsumerWidget {
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.redAccent,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
             ),
             onPressed: () async {
               Navigator.pop(ctx);
@@ -544,7 +544,7 @@ void showTrackInfoSheet(BuildContext context, WidgetRef ref, Track track) async 
     backgroundColor: AppColors.surface,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      borderRadius: BorderRadius.vertical(top: Radius.zero),
     ),
     builder: (ctx) {
       final formattedDuration = () {
@@ -573,7 +573,7 @@ void showTrackInfoSheet(BuildContext context, WidgetRef ref, Track track) async 
                       width: 40, height: 4,
                       decoration: BoxDecoration(
                         color: Colors.white24,
-                        borderRadius: BorderRadius.circular(2),
+                        borderRadius: BorderRadius.zero,
                       ),
                     ),
                   ),
@@ -584,7 +584,7 @@ void showTrackInfoSheet(BuildContext context, WidgetRef ref, Track track) async 
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.zero,
                         child: Container(
                           width: 80, height: 80,
                           color: AppColors.bg,
@@ -730,7 +730,7 @@ void showTrackInfoSheet(BuildContext context, WidgetRef ref, Track track) async 
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
                             color: AppColors.accent.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.zero,
                             border: Border.all(color: AppColors.accent.withOpacity(0.3), width: 1),
                           ),
                           child: Text(

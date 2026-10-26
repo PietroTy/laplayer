@@ -1,14 +1,11 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/theme.dart';
-import '../../data/database/database.dart';
 import '../../data/models/album_group.dart';
-import '../../data/models/track.dart';
-import '../../providers/player_provider.dart';
-import '../../data/models/player_state.dart' as app;
-import 'track_tile.dart';
+import '../album_screen.dart';
 
 class AlbumGridView extends ConsumerStatefulWidget {
   final List<AlbumGroup> albums;
@@ -95,7 +92,7 @@ class _AlbumCardPlaceholder extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.zero,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -105,7 +102,7 @@ class _AlbumCardPlaceholder extends StatelessWidget {
             child: Container(
               decoration: const BoxDecoration(
                 color: AppColors.surfaceHigh,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+                borderRadius: BorderRadius.vertical(top: Radius.zero),
               ),
               child: const Center(
                 child: Icon(Icons.album_rounded, color: Colors.white10, size: 40),
@@ -119,12 +116,12 @@ class _AlbumCardPlaceholder extends StatelessWidget {
               children: [
                 Container(
                   width: 90, height: 10,
-                  decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(4)),
+                  decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.zero),
                 ),
                 const SizedBox(height: 6),
                 Container(
                   width: 60, height: 8,
-                  decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(4)),
+                  decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.zero),
                 ),
               ],
             ),
@@ -151,12 +148,12 @@ class _AlbumCard extends ConsumerWidget {
     final isComplete = pct >= 1.0;
 
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: () => _showAlbumSheet(context, ref),
+      borderRadius: BorderRadius.zero,
+      onTap: () => context.push(albumRoute(album.albumName, album.albumArtist)),
       child: Container(
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.zero,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -165,7 +162,7 @@ class _AlbumCard extends ConsumerWidget {
             AspectRatio(
               aspectRatio: 1,
               child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                borderRadius: const BorderRadius.vertical(top: Radius.zero),
                 child: album.albumArtUrl != null
                     ? CachedNetworkImage(
                         imageUrl: album.albumArtUrl!,
@@ -203,7 +200,7 @@ class _AlbumCard extends ConsumerWidget {
                     children: [
                       Expanded(
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(2),
+                          borderRadius: BorderRadius.zero,
                           child: LinearProgressIndicator(
                             value: pct,
                             backgroundColor: AppColors.surfaceHigh,
@@ -234,154 +231,4 @@ class _AlbumCard extends ConsumerWidget {
       child: Icon(Icons.album_rounded, color: AppColors.textMuted, size: 40),
     ),
   );
-
-  void _showAlbumSheet(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _AlbumTracksSheet(
-        album: album,
-        playlistNames: playlistNames,
-        playlistId: playlistId,
-      ),
-    );
-  }
-}
-
-class _AlbumTracksSheet extends ConsumerStatefulWidget {
-  final AlbumGroup album;
-  final Map<String, String> playlistNames;
-  final String? playlistId;
-  const _AlbumTracksSheet({
-    required this.album,
-    required this.playlistNames,
-    this.playlistId,
-  });
-
-  @override
-  ConsumerState<_AlbumTracksSheet> createState() => _AlbumTracksSheetState();
-}
-
-class _AlbumTracksSheetState extends ConsumerState<_AlbumTracksSheet> {
-  List<Track> _tracks = [];
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final tracks = await AppDatabase.instance.getTracksForAlbum(
-      widget.album.albumName,
-      playlistId: widget.playlistId,
-    );
-    if (mounted) setState(() { _tracks = tracks; _loading = false; });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final available = _tracks.where((t) => t.isCached).toList();
-    final playlists = widget.album.playlistIds
-        .map((id) => widget.playlistNames[id] ?? id)
-        .where((n) => n.isNotEmpty)
-        .join(', ');
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.75,
-      maxChildSize: 0.95,
-      minChildSize: 0.4,
-      expand: false,
-      builder: (_, controller) => Column(
-        children: [
-          // Handle
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Center(
-              child: Container(
-                width: 40, height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.textMuted.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-          ),
-          // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Row(
-              children: [
-                if (widget.album.albumArtUrl != null)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: CachedNetworkImage(
-                      imageUrl: widget.album.albumArtUrl!,
-                      width: 60, height: 60, fit: BoxFit.cover,
-                    ),
-                  ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(widget.album.albumName,
-                        style: const TextStyle(
-                          color: AppColors.textPrimary, fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(widget.album.albumArtist,
-                        style: const TextStyle(color: AppColors.textSecond, fontSize: 13)),
-                      if (widget.album.releaseYear.isNotEmpty)
-                        Text(widget.album.releaseYear,
-                          style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
-                      if (playlists.isNotEmpty)
-                        Text('em: $playlists',
-                          style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ],
-                  ),
-                ),
-                if (available.isNotEmpty)
-                  GestureDetector(
-                    onTap: () => ref.read(playerProvider.notifier)
-                        .playQueueWithShuffle(available, shuffleMode: app.ShuffleMode.random),
-                    child: Container(
-                      width: 40, height: 40,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: AppColors.accent,
-                      ),
-                      child: const Icon(Icons.play_arrow_rounded,
-                        color: Colors.black, size: 24),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const Divider(color: AppColors.border, height: 1),
-          // Tracks
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : ListView.builder(
-                    controller: controller,
-                    itemCount: _tracks.length,
-                    itemBuilder: (context, i) => TrackTile(
-                      track: _tracks[i],
-                      queue: available,
-                      showIndex: false,
-                    ),
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
 }

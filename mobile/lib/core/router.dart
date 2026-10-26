@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../screens/add_playlist_screen.dart';
+import '../screens/album_screen.dart';
 import '../screens/artist_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/library_screen.dart';
@@ -70,6 +71,13 @@ class AppRouter {
               final name = Uri.decodeComponent(state.pathParameters['name']!);
               return ArtistScreen(artistName: name);
             },
+          ),
+          GoRoute(
+            path: '/album',
+            builder: (context, state) => AlbumScreen(
+              albumName: state.uri.queryParameters['name'] ?? '',
+              artist: state.uri.queryParameters['artist'] ?? '',
+            ),
           ),
           GoRoute(
             path: '/add-playlist',

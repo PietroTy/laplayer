@@ -1,0 +1,12 @@
+slskd-downloads/
+slskd-bin/
+slskd-data/
+slskd-incomplete/
+slskd-shared/
+temp_downloads/
+__pycache__/
+*.log
+*.pid
+.git/
+.venv/
+node_modules/

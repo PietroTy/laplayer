@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum AppThemePalette {
-  purplish("Purplish", Color(0xFFBB86FC), Color(0xFF7B2CBF), Color(0xFF120E24)),
+  // Padrão: as mesmas cores do Calcite, do Amethist e do portfólio.
+  purplish("Purplish", Color(0xFF9D5CFC), Color(0xFF7C3AED), Color(0xFF080810)),
   spotifake("Spotifake", Color(0xFF1ED760), Color(0xFF158A3E), Color(0xFF090909)),
   stargaze("Stargaze", Color(0xFFFFD700), Color(0xFFFFA000), Color(0xFF0E1428)),
   burntSienna("Burnt Sienna", Color(0xFFE07A5F), Color(0xFFB04A33), Color(0xFF1E120E)),
@@ -32,7 +32,7 @@ enum AppThemePalette {
   List<Color>? get bgGradientColors {
     switch (this) {
       case AppThemePalette.purplish:
-        return const [Color(0xFF241442), Color(0xFF140D28), Color(0xFF080512)];
+        return const [Color(0xFF170F2C), Color(0xFF0D0B1A), Color(0xFF080810)];
       case AppThemePalette.stargaze:
         return const [Color(0xFF1A284D), Color(0xFF0E1528), Color(0xFF060914)];
       case AppThemePalette.oceanBreeze:
@@ -61,27 +61,28 @@ enum AppThemePalette {
   }
 }
 
-/// Paleta de cores do Localify (valores mutáveis para suportar temas dinâmicos)
+/// Paleta de cores do LaPlayer (valores mutáveis para suportar temas dinâmicos).
+/// Superfícies, bordas e textos seguem o visual dos outros apps (Calcite, Amethist): roxo escuro, cantos retos.
 abstract class AppColors {
   // ── Backgrounds ────────────────────────────────────────────────────────
-  static Color bg           = const Color(0xFF0D0B18);  // Purplish por padrão
+  static Color bg           = const Color(0xFF080810);  // Purplish por padrão
   static LinearGradient? bgGradient;                     // Fundo dégradé se ativado
-  static const Color surface      = Color(0xFF141414);  // Cards e bottom sheets
-  static const Color surfaceHigh  = Color(0xFF1E1E1E);  // Elementos elevados
-  static const Color border = Color(0xFF2A2A2A);
+  static const Color surface      = Color(0xFF12121F);  // Cards e bottom sheets
+  static const Color surfaceHigh  = Color(0xFF1A1A2E);  // Elementos elevados
+  static const Color border = Color(0x407C5CFC);
 
   // ── Acento primário ───────────────────────────────────────────────────
-  static Color accent       = const Color(0xFFBB86FC);  // Purplish por padrão
-  static Color accentDim    = const Color(0xFF7B2CBF);  // Purplish por padrão
+  static Color accent       = const Color(0xFF9D5CFC);  // Purplish por padrão
+  static Color accentDim    = const Color(0xFF7C3AED);  // Purplish por padrão
 
   // ── Texto ─────────────────────────────────────────────────────────────
-  static const Color textPrimary  = Color(0xFFFFFFFF);
-  static const Color textSecond   = Color(0xFFB3B3B3);
-  static const Color textMuted    = Color(0xFF6B6B6B);
+  static const Color textPrimary  = Color(0xFFEDE9F8);
+  static const Color textSecond   = Color(0xFFB4AFCC);
+  static const Color textMuted    = Color(0xFF8A84A8);
 
   // ── Extras ────────────────────────────────────────────────────────────
-  static const Color error        = Color(0xFFFF4444);
-  static const Color warning      = Color(0xFFFFB800);
+  static const Color error        = Color(0xFFFB7185);
+  static const Color warning      = Color(0xFFFBBF24);
 
   // ── Efeitos (Glassmorfismo) ───────────────────────────────────────────
   static Color get glassSurface => surface.withValues(alpha: 0.6);
@@ -139,8 +140,30 @@ class AppBackground extends StatelessWidget {
 }
 
 class AppTheme {
+  static const font = 'Monocraft';
+
+  /// Texto e ícone em cima da cor de destaque: branco no roxo (como no Calcite), preto nas cores claras.
+  static Color onAccent(AppThemePalette p) => p.accent.computeLuminance() > 0.35 ? Colors.black : Colors.white;
+
   static ThemeData dark(AppThemePalette palette) {
-    final base = ThemeData.dark(useMaterial3: true);
+    final base = ThemeData.dark(useMaterial3: true).copyWith(
+      // Botões, cartões, folhas e diálogos com cantos retos, como nos outros apps.
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: palette.accent,
+          side: BorderSide(color: palette.accent),
+          shape: const RoundedRectangleBorder(),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          textStyle: const TextStyle(fontFamily: font, fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(backgroundColor: AppColors.surface, shape: RoundedRectangleBorder()),
+      dialogTheme: const DialogThemeData(backgroundColor: AppColors.surface, shape: RoundedRectangleBorder()),
+      snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder()),
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(shape: RoundedRectangleBorder()),
+      popupMenuTheme: const PopupMenuThemeData(color: AppColors.surfaceHigh, shape: RoundedRectangleBorder()),
+      chipTheme: const ChipThemeData(shape: RoundedRectangleBorder()),
+    );
 
     return base.copyWith(
       scaffoldBackgroundColor: palette.bg,
@@ -149,37 +172,37 @@ class AppTheme {
         secondary:      palette.accentDim,
         surface:        AppColors.surface,
         error:          AppColors.error,
-        onPrimary:      Colors.black,
+        onPrimary:      AppTheme.onAccent(palette),
         onSecondary:    Colors.white,
         onSurface:      AppColors.textPrimary,
         onError:        Colors.white,
       ),
-      textTheme: GoogleFonts.dmSansTextTheme(base.textTheme).copyWith(
-        displayLarge: GoogleFonts.dmSans(
+      textTheme: base.textTheme.apply(fontFamily: font).copyWith(
+        displayLarge: TextStyle(fontFamily: font, 
           color: AppColors.textPrimary, fontSize: 32, fontWeight: FontWeight.w700, letterSpacing: -1.0,
         ),
-        displayMedium: GoogleFonts.dmSans(
+        displayMedium: TextStyle(fontFamily: font, 
           color: AppColors.textPrimary, fontSize: 24, fontWeight: FontWeight.w700, letterSpacing: -0.5,
         ),
-        headlineMedium: GoogleFonts.dmSans(
+        headlineMedium: TextStyle(fontFamily: font, 
           color: AppColors.textPrimary, fontSize: 20, fontWeight: FontWeight.w600,
         ),
-        titleLarge: GoogleFonts.dmSans(
+        titleLarge: TextStyle(fontFamily: font, 
           color: AppColors.textPrimary, fontSize: 17, fontWeight: FontWeight.w600,
         ),
-        titleMedium: GoogleFonts.dmSans(
+        titleMedium: TextStyle(fontFamily: font, 
           color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w500,
         ),
-        bodyLarge: GoogleFonts.dmSans(
+        bodyLarge: TextStyle(fontFamily: font, 
           color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w400,
         ),
-        bodyMedium: GoogleFonts.dmSans(
+        bodyMedium: TextStyle(fontFamily: font, 
           color: AppColors.textSecond, fontSize: 13, fontWeight: FontWeight.w400,
         ),
-        bodySmall: GoogleFonts.dmSans(
+        bodySmall: TextStyle(fontFamily: font, 
           color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w400,
         ),
-        labelLarge: GoogleFonts.dmSans(
+        labelLarge: TextStyle(fontFamily: font, 
           color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.5,
         ),
       ),
@@ -188,7 +211,7 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
-        titleTextStyle: GoogleFonts.dmSans(
+        titleTextStyle: TextStyle(fontFamily: font, 
           color: AppColors.textPrimary,
           fontSize: 18,
           fontWeight: FontWeight.w700,
@@ -227,9 +250,9 @@ class AppTheme {
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: palette.accent,
-          foregroundColor: Colors.black,
-          textStyle: GoogleFonts.dmSans(fontSize: 14, fontWeight: FontWeight.w700),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+          foregroundColor: AppTheme.onAccent(palette),
+          textStyle: TextStyle(fontFamily: font, fontSize: 14, fontWeight: FontWeight.w700),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
           elevation: 0,
         ),
@@ -240,9 +263,9 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: AppColors.surfaceHigh,
-        hintStyle: GoogleFonts.dmSans(color: AppColors.textMuted),
+        hintStyle: TextStyle(fontFamily: font, color: AppColors.textMuted),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.zero,
           borderSide: BorderSide.none,
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -255,9 +278,9 @@ class AppTheme {
       hintText: hint,
       filled: true,
       fillColor: AppColors.surfaceHigh,
-      hintStyle: GoogleFonts.dmSans(color: AppColors.textMuted),
+      hintStyle: TextStyle(fontFamily: font, color: AppColors.textMuted),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.zero,
         borderSide: BorderSide.none,
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
